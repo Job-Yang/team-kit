@@ -32,8 +32,17 @@ SUBJECTIVE_OWNER_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
 TEXT_EXTS = {".md", ".json", ".txt", ".yml", ".yaml"}
 
 
+PRIVATE_PATHS = [
+    "data",
+    "context/data",
+    "radar/data",
+    "local-data",
+    "adapters/local",
+]
+
+
 def check_public_remote_leak(repo_root: Path) -> list[str]:
-    """检查当前仓库是否绑定 github.com 且同时追踪/暂存了 data/ 下真实文件。"""
+    """检查当前仓库是否绑定 github.com 且同时追踪/暂存了任何私密数据或本地适配器目录。"""
     errors: list[str] = []
     if not (repo_root / ".git").exists():
         return errors
@@ -47,13 +56,13 @@ def check_public_remote_leak(repo_root: Path) -> list[str]:
         return errors
 
     tracked = subprocess.run(
-        ["git", "-C", str(repo_root), "ls-files", "data/"],
+        ["git", "-C", str(repo_root), "ls-files", "--", *PRIVATE_PATHS],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
     ).stdout.strip()
     staged = subprocess.run(
-        ["git", "-C", str(repo_root), "diff", "--cached", "--name-only", "--", "data/"],
+        ["git", "-C", str(repo_root), "diff", "--cached", "--name-only", "--", *PRIVATE_PATHS],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -62,9 +71,25 @@ def check_public_remote_leak(repo_root: Path) -> list[str]:
     if tracked or staged:
         files = sorted(set((tracked + "\n" + staged).splitlines()))
         errors.append(
-            f"当前仓库远端包含 github.com，严禁将 data/ 纳入 Git 追踪（命中：{', '.join(f for f in files if f)}）"
+            f"当前仓库远端包含 github.com，严禁将私密数据或本地适配器纳入 Git 追踪（命中：{', '.join(f for f in files if f)}）"
         )
     return errors
+
+
+def scan_single_file(file_path: Path) -> list[str]:
+    """扫描单个文件（例如 radar snapshot.json）是否混入敏感凭证或隐私字段。"""
+    blockers: list[str] = []
+    if not file_path.is_file():
+        return [f"待检查文件不存在: {file_path}"]
+    try:
+        text = file_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        return [f"无法读取 {file_path}: {exc}"]
+    for line_no, line in enumerate(text.splitlines(), start=1):
+        for label, pat in SECRET_PATTERNS:
+            if pat.search(line):
+                blockers.append(f"[{label}] {file_path.name}:{line_no}")
+    return blockers
 
 
 def scan_data_dir(
@@ -119,8 +144,9 @@ def scan_data_dir(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Team Context 安全拦截与保鲜检查")
-    parser.add_argument("--data", default="data", help="团队数据目录（默认 data）")
+    parser = argparse.ArgumentParser(description="Team Kit 安全拦截与保鲜检查")
+    parser.add_argument("--data", action="append", help="团队数据目录（可多次传入；不传且无 --snapshot 时默认检查 data）")
+    parser.add_argument("--snapshot", action="append", default=[], help="可选：待检查的 Radar 快照 JSON 文件路径")
     parser.add_argument("--repo-root", default=".", help="用于检查 Git 远端防漏的仓库根目录")
     parser.add_argument("--no-remote-check", action="store_true", help="跳过 github.com 远端防漏检查")
     parser.add_argument("--no-freshness", action="store_true", help="跳过过期日期提醒")
@@ -132,11 +158,16 @@ def main() -> int:
     if not args.no_remote_check:
         blockers.extend(check_public_remote_leak(Path(args.repo_root).resolve()))
 
-    d_blockers, d_warnings = scan_data_dir(
-        Path(args.data), check_freshness=not args.no_freshness
-    )
-    blockers.extend(d_blockers)
-    warnings.extend(d_warnings)
+    data_dirs = args.data if args.data else ([] if args.snapshot else ["data"])
+    for d in data_dirs:
+        d_blockers, d_warnings = scan_data_dir(
+            Path(d), check_freshness=not args.no_freshness
+        )
+        blockers.extend(d_blockers)
+        warnings.extend(d_warnings)
+
+    for snap in args.snapshot:
+        blockers.extend(scan_single_file(Path(snap)))
 
     if blockers:
         print("❌ 安全检查未通过（阻断提交）：", file=sys.stderr)

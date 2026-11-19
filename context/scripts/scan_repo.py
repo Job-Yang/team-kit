@@ -238,7 +238,7 @@ def scan_module_graph(
 
 def write_scan_report(
     out_dir: Path,
-    repo: Path,
+    repo_label: str,
     days: int,
     summary: dict[str, object],
 ) -> None:
@@ -247,10 +247,10 @@ def write_scan_report(
         "---",
         f"updated: {datetime.date.today().isoformat()}",
         "review_cycle: 30d",
-        f"source_repo: {repo.name}",
+        f"source_repo: {repo_label}",
         "---",
         "",
-        f"# 代码库只读扫描草稿：{repo.name}",
+        f"# 代码库只读扫描草稿：{repo_label}",
         "",
         f"> 统计窗口：近 {days} 天，有效非合并提交 {summary['commit_count']} 次。"
         "本文件为草稿，请核对后将稳定结构合入正式目录。",
@@ -280,44 +280,82 @@ def write_scan_report(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="只读扫描 Git 代码仓，生成团队结构与热区草稿")
-    parser.add_argument("--repo", required=True, help="目标 Git 代码仓库路径")
+    parser = argparse.ArgumentParser(description="只读扫描一个或多个 Git 代码仓，生成团队结构与热区草稿")
+    parser.add_argument("--repo", action="append", required=True, help="目标 Git 代码仓库路径（可多次传入实现跨仓合并）")
     parser.add_argument("--days", type=int, default=90, help="统计最近多少天提交（默认 90）")
-    parser.add_argument("--out", default="data/inbox/scan", help="草稿输出目录（默认 data/inbox/scan）")
-    parser.add_argument("--repo-web-url", default="", help="可选：代码库网页根地址，用于生成图谱跳转链接")
+    parser.add_argument("--out", default="context/data/inbox/scan", help="草稿输出目录（默认 context/data/inbox/scan）")
+    parser.add_argument("--repo-web-url", action="append", default=[], help="可选：代码库网页根地址，按顺序对应 --repo")
     args = parser.parse_args()
 
-    repo = Path(args.repo).resolve()
-    if not (repo / ".git").exists():
-        print(f"[错误] 目标路径不是 Git 仓库: {repo}", file=sys.stderr)
-        return 1
+    repos = [Path(r).resolve() for r in args.repo]
+    for repo in repos:
+        if not (repo / ".git").exists():
+            print(f"[错误] 目标路径不是 Git 仓库: {repo}", file=sys.stderr)
+            return 1
 
-    try:
-        commits = parse_commits_with_files(repo, args.days)
-        risk_commits = get_risk_commits(repo)
-    except Exception as exc:
-        print(f"[错误] 扫描 Git 历史失败: {exc}", file=sys.stderr)
-        return 1
-
+    multi_mode = len(repos) > 1
     file_counter: Counter[str] = Counter()
     co_change_counter: Counter[tuple[str, str]] = Counter()
     mod_hot: Counter[str] = Counter()
     mod_authors: dict[str, Counter[str]] = defaultdict(Counter)
+    all_risk_commits: list[dict[str, str]] = []
+    merged_nodes: list[dict[str, object]] = []
+    merged_edges: list[dict[str, object]] = []
+    total_commits = 0
 
-    for c in commits:
-        files = sorted(set(c["files"]))  # type: ignore[arg-type]
-        author = str(c["author"])
-        for f in files:
-            file_counter[f] += 1
-            mod = module_bucket(f)
-            mod_hot[mod] += 1
-            mod_authors[mod][author] += 1
-        # 跳过超 30 个文件的批量格式化/大合并提交，避免污染耦合统计
-        if 2 <= len(files) <= 30:
-            for i in range(len(files)):
-                for j in range(i + 1, len(files)):
-                    co_change_counter[(files[i], files[j])] += 1
+    for idx, repo in enumerate(repos):
+        web_url = args.repo_web_url[idx] if idx < len(args.repo_web_url) else ""
+        try:
+            commits = parse_commits_with_files(repo, args.days)
+            risk_commits = get_risk_commits(repo)
+        except Exception as exc:
+            print(f"[错误] 扫描 Git 历史失败 ({repo.name}): {exc}", file=sys.stderr)
+            return 1
 
+        total_commits += len(commits)
+        local_mod_hot: Counter[str] = Counter()
+        local_mod_authors: dict[str, Counter[str]] = defaultdict(Counter)
+        prefix = f"{repo.name}/" if multi_mode else ""
+
+        for c in commits:
+            files = sorted(set(c["files"]))  # type: ignore[arg-type]
+            author = str(c["author"])
+            for f in files:
+                mod = module_bucket(f)
+                full_f = prefix + f
+                full_mod = prefix + mod
+                file_counter[full_f] += 1
+                mod_hot[full_mod] += 1
+                mod_authors[full_mod][author] += 1
+                local_mod_hot[mod] += 1
+                local_mod_authors[mod][author] += 1
+            if 2 <= len(files) <= 30:
+                for i in range(len(files)):
+                    for j in range(i + 1, len(files)):
+                        co_change_counter[(prefix + files[i], prefix + files[j])] += 1
+
+        for rc in risk_commits:
+            rc_copy = dict(rc)
+            if multi_mode:
+                rc_copy["subject"] = f"[{repo.name}] {rc_copy['subject']}"
+            all_risk_commits.append(rc_copy)
+
+        sub_graph = scan_module_graph(repo, local_mod_hot, local_mod_authors, web_url)
+        for n in sub_graph["nodes"]:  # type: ignore[attr-defined]
+            node_copy = dict(n)
+            if multi_mode:
+                node_copy["id"] = f"{repo.name}/{node_copy['id']}"
+                node_copy["label"] = f"{repo.name}/{node_copy['label']}"
+                node_copy["group"] = repo.name
+            merged_nodes.append(node_copy)
+        for e in sub_graph["edges"]:  # type: ignore[attr-defined]
+            edge_copy = dict(e)
+            if multi_mode:
+                edge_copy["source"] = f"{repo.name}/{edge_copy['source']}"
+                edge_copy["target"] = f"{repo.name}/{edge_copy['target']}"
+            merged_edges.append(edge_copy)
+
+    all_risk_commits.sort(key=lambda x: x.get("date", ""), reverse=True)
     hot_files = [
         {"file": f, "count": cnt, "module": module_bucket(f)}
         for f, cnt in file_counter.most_common(30)
@@ -335,17 +373,25 @@ def main() -> int:
         for mod, _ in mod_hot.most_common(25)
     ]
 
+    repo_label = " + ".join(r.name for r in repos)
     summary = {
-        "repo": str(repo),
-        "repo_name": repo.name,
+        "repo": str(repos[0]) if not multi_mode else [str(r) for r in repos],
+        "repo_name": repo_label,
         "days": args.days,
-        "commit_count": len(commits),
+        "commit_count": total_commits,
         "hot_files": hot_files,
         "co_changes": co_changes,
         "dir_owners": dir_owners,
-        "risk_commits": risk_commits,
+        "risk_commits": all_risk_commits[:40],
     }
-    graph_draft = scan_module_graph(repo, mod_hot, mod_authors, args.repo_web_url)
+    graph_draft = {
+        "schema": "team-context-code-graph/v1",
+        "updated": datetime.date.today().isoformat(),
+        "repo_name": repo_label,
+        "repo_web_url": args.repo_web_url[0] if args.repo_web_url else "",
+        "nodes": merged_nodes[:45],
+        "edges": merged_edges[:60],
+    }
 
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -355,13 +401,13 @@ def main() -> int:
     (out_dir / "code-graph.draft.json").write_text(
         json.dumps(graph_draft, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
-    write_scan_report(out_dir, repo, args.days, summary)
+    write_scan_report(out_dir, repo_label, args.days, summary)
 
-    print(f"扫描完成：{repo.name}（近 {args.days} 天共 {len(commits)} 次非合并提交）")
+    print(f"扫描完成：{repo_label}（近 {args.days} 天共 {total_commits} 次非合并提交）")
     print(f"  - 热改与耦合摘要: {out_dir / 'scan-summary.json'}")
     print(f"  - 可读扫描报告:   {out_dir / 'scan-report.md'}")
     print(f"  - 代码关系图草稿: {out_dir / 'code-graph.draft.json'}")
-    print("提示：请先核对草稿并补齐模块说明，再合入 data/code-graph.json。")
+    print("提示：请先核对草稿并补齐模块说明，再合入正式 code-graph.json。")
     return 0
 
 

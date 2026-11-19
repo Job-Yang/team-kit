@@ -59,12 +59,14 @@ team-kit/                          # 单个工作区：外层工具可带走，d
 ├── README.md                      # 仓库总览：说明 context/ 与 radar/ 两个独立模块
 ├── docs/                          # 给人看的设计文档（team-context.md / team-radar.md）
 ├── context/scripts/               # Team Context 通用脚本（不绑定任何公司，可放 GitHub）
-│   ├── scan_repo.py               # 自动分析代码架构、热改文件、回滚历史与目录活跃作者
-│   ├── absorb_docs.py             # 辅助批量拆解现有新人文档、周报与复盘为结构化草稿
+│   ├── init_team.py               # 一条命令生成 7 类标准纯文本模板与 inbox 草稿区
+│   ├── scan_repo.py               # 自动分析单仓/多仓代码架构、热改文件、回滚历史与活跃作者
 │   ├── build_portal.py            # 一条命令把 data/ 编译成可交互的 HTML 团队网站（附带导出 MD 文档）
 │   ├── sync_ai_rules.py           # 生成或同步 AGENTS.md / CLAUDE.md / IDE 规则文件
 │   └── check_safety.py            # 提交前检查密码/Token/隐私敏感词，以及死链与过期提醒
-├── radar/scripts/                 # Team Radar 问题发现看板与 AI 排查包编译器
+├── radar/scripts/                 # Team Radar 问题发现看板与快照校验编译器
+├── adapters/                      # 扩展适配器（公网放通用脚本，adapters/local/ 放内网专属拉数）
+├── scripts/refresh.py             # 按 data/sources.json 一键串联取数、体检与双网页生成
 └── data/                          # 【通过 .gitignore 与外层隔离，仅存储在公司内网 Git 仓】
     ├── inbox/                     # 待确认草稿区（脚本扫描和 AI 拆解的初稿先放这里）
     ├── platforms.json             # 研发环境与各类日常平台的一站式直达入口配置

@@ -103,13 +103,18 @@ Team Radar 聚焦 **发现卡点 + 定位代码 + 交接 AI** 这三件事，不
 常用命令（在 `team-kit` 根目录执行）：
 
 ```bash
-# 1. 使用内置 Demo 生成交互看板（含 tokens 导出）
+# 1. 使用内置 Demo 生成交互看板（含 tokens 导出）与结构校验
+python3 radar/scripts/validate_snapshot.py --input radar/examples/demo-radar.json
 python3 radar/scripts/build_radar.py --input radar/examples/demo-radar.json --out dist/radar-demo.html --tokens-out dist/tokens.json
 
-# 2. 列出重点问题，并导出单条上下文包交给 AI 排查
+# 2. 用通用适配器汇聚导表与 Git 热修数据，或按 sources.json 一键刷新
+python3 adapters/git_rework.py --snapshot radar/data/snapshot.merged.json --repo /path/to/repo --days 7
+python3 scripts/refresh.py --sources data/sources.json
+
+# 3. 列出重点问题，并导出单条上下文包交给 AI 排查
 python3 radar/scripts/build_radar.py --input radar/examples/demo-radar.json --list-findings
 python3 radar/scripts/build_radar.py --input radar/examples/demo-radar.json --export-prompt f_page_capture_tech
 
-# 3. 联动 Team Context 数据目录生成看板（可选）
+# 4. 联动 Team Context 数据目录生成看板（可选）
 python3 radar/scripts/build_radar.py --input data/radar-snapshot.json --context-dir context/data --out dist/radar.html --tokens-out dist/tokens.json
 ```

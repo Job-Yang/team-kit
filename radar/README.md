@@ -16,6 +16,15 @@ open dist/radar-demo.html
 ## 常用命令行用法
 
 ```bash
+# 校验标准快照 JSON 结构与数值类型
+python3 radar/scripts/validate_snapshot.py --input radar/examples/demo-radar.json
+
+# 从本地 Git 仓自动统计近 7 天热修返工写入快照
+python3 adapters/git_rework.py --snapshot radar/data/snapshot.merged.json --repo /path/to/repo --days 7
+
+# 将标准节点 / 时间线 CSV 合并进快照
+python3 adapters/csv_to_snapshot.py --snapshot radar/data/snapshot.merged.json --nodes-csv radar/data/nodes.csv --timeline-csv radar/data/timeline.csv
+
 # 查看自动提炼的所有重点问题 ID
 python3 radar/scripts/build_radar.py --input radar/examples/demo-radar.json --list-findings
 

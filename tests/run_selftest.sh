@@ -128,6 +128,7 @@ set -e
 test "$RC_STALE" -eq 2
 
 echo "=== 6. 测试 Team Radar：Demo 编译 + 导包 + Context 联动 + JS 与文案校验 ==="
+python3 "$ROOT_DIR/radar/scripts/validate_snapshot.py" --input "$ROOT_DIR/radar/examples/demo-radar.json"
 python3 "$ROOT_DIR/radar/scripts/build_radar.py" \
   --input "$ROOT_DIR/radar/examples/demo-radar.json" \
   --out "$TMP_DIR/radar.html" \
@@ -170,5 +171,133 @@ if command -v node >/dev/null 2>&1; then
   node --check "$TMP_DIR/radar_js_check.js"
   echo "Team Radar JS 语法校验通过 (node --check)"
 fi
+
+echo "=== 7. 测试多仓 scan_repo、快照校验反例与 --snapshot 安全拦截 ==="
+SECOND_REPO="$TMP_DIR/mock-bff"
+mkdir -p "$SECOND_REPO/BFF/Order"
+git init "$SECOND_REPO" >/dev/null
+git -C "$SECOND_REPO" config user.name "Carol"
+git -C "$SECOND_REPO" config user.email "carol@example.com"
+cat > "$SECOND_REPO/BFF/Order/submit.ts" <<'EOF'
+export const ok = true;
+EOF
+git -C "$SECOND_REPO" add .
+git -C "$SECOND_REPO" commit -m "feat: bff submit" >/dev/null
+
+python3 "$ROOT_DIR/context/scripts/scan_repo.py" \
+  --repo "$SAMPLE_REPO" \
+  --repo "$SECOND_REPO" \
+  --repo-web-url "https://git.example.com/mock/app" \
+  --repo-web-url "https://git.example.com/mock/bff" \
+  --out "$TMP_DIR/multi-scan"
+python3 - "$TMP_DIR/multi-scan/code-graph.draft.json" <<'PY'
+import json, sys
+g = json.load(open(sys.argv[1], encoding="utf-8"))
+ids = [n["id"] for n in g["nodes"]]
+assert any(x.startswith("mock-repo/") for x in ids), ids
+assert any(x.startswith("mock-bff/") for x in ids), ids
+PY
+
+cat > "$TMP_DIR/bad-snapshot.json" <<'EOF'
+{
+  "product_name": "坏样例",
+  "flow": {
+    "nodes": [{"id": "n1", "title": "首页", "col": 0, "row": 0}],
+    "edges": [{"from": "n1", "to": "missing_node"}]
+  },
+  "timeline": {"dates": ["11-01", "11-02"], "biz_conv": [50], "tech_p90_ms": [200]}
+}
+EOF
+set +e
+python3 "$ROOT_DIR/radar/scripts/validate_snapshot.py" --input "$TMP_DIR/bad-snapshot.json"
+RC_BAD_SNAP=$?
+set -e
+test "$RC_BAD_SNAP" -eq 1
+
+cp "$ROOT_DIR/radar/examples/demo-radar.json" "$TMP_DIR/leak-snap.json"
+echo '{"secret":"sk-testAbCdEfGhIjKlMnOpQrStUvWxYz"}' >> "$TMP_DIR/leak-snap.json"
+set +e
+python3 "$ROOT_DIR/context/scripts/check_safety.py" --snapshot "$TMP_DIR/leak-snap.json" --no-remote-check
+RC_LEAK_SNAP=$?
+set -e
+test "$RC_LEAK_SNAP" -eq 3
+
+echo "=== 8. 测试 adapters（git_rework + csv_to_snapshot）、极端真实数据与 scripts/refresh.py ==="
+cat > "$TMP_DIR/nodes.csv" <<'EOF'
+id,title,stage,owner,col,row,uv,pv,conv_rate,conv_delta,stay_sec,p90_ms,crash_rate,backtrack_rate,ai_correct_rate
+entry,入口页,入口,体验组,0,0,50000,72000,8.5,-1.2,4.1,180,0.01,1.0,0.0
+step4,深层结果页,完结,业务组,4,2,12000,15000,92.0,-8.5,15.0,4600,0.90,26.0,16.0
+EOF
+cat > "$TMP_DIR/timeline.csv" <<'EOF'
+date,biz_conv,tech_p90_ms,crash_rate
+11-01,8.5,180,0.01
+11-02,42.0,1950,0.22
+11-03,92.0,4600,0.90
+EOF
+
+python3 "$ROOT_DIR/adapters/csv_to_snapshot.py" \
+  --snapshot "$TMP_DIR/ext-snap.json" \
+  --nodes-csv "$TMP_DIR/nodes.csv" \
+  --timeline-csv "$TMP_DIR/timeline.csv" \
+  --product-name "宽值域多列测试"
+
+python3 "$ROOT_DIR/adapters/git_rework.py" \
+  --snapshot "$TMP_DIR/ext-snap.json" \
+  --repo "$SAMPLE_REPO" \
+  --repo "$SECOND_REPO" \
+  --days 7 \
+  --top 5
+
+python3 "$ROOT_DIR/radar/scripts/validate_snapshot.py" --input "$TMP_DIR/ext-snap.json"
+python3 "$ROOT_DIR/radar/scripts/build_radar.py" \
+  --input "$TMP_DIR/ext-snap.json" \
+  --out "$TMP_DIR/ext-radar.html" \
+  --tokens-out "$TMP_DIR/ext-tokens.json"
+
+# 极简空模块快照（仅 product_name，无 flow/timeline/engineering）也必须正常编译
+cat > "$TMP_DIR/minimal-snap.json" <<'EOF'
+{
+  "product_name": "最小空态测试",
+  "window": "仅基础配置",
+  "thresholds": {"crash_danger": 0.5}
+}
+EOF
+python3 "$ROOT_DIR/radar/scripts/validate_snapshot.py" --input "$TMP_DIR/minimal-snap.json"
+python3 "$ROOT_DIR/radar/scripts/build_radar.py" \
+  --input "$TMP_DIR/minimal-snap.json" \
+  --out "$TMP_DIR/minimal-radar.html" \
+  --tokens-out "$TMP_DIR/minimal-tokens.json"
+
+# 一键串联 refresh.py 端到端测试
+mkdir -p "$TMP_DIR/ref-work/context-data" "$TMP_DIR/ref-work/out"
+cp -R "$ROOT_DIR/context/examples/sample-team/." "$TMP_DIR/ref-work/context-data/"
+cat > "$TMP_DIR/sources.test.json" <<EOF
+{
+  "team_name": "端到端联动测试团队",
+  "context": {
+    "enabled": true,
+    "data_dir": "$TMP_DIR/ref-work/context-data",
+    "repos": [{"path": "$SAMPLE_REPO", "web_url": "https://git.example.com/mock/app"}],
+    "scan_days": 30,
+    "out_html": "$TMP_DIR/ref-work/out/context.html",
+    "out_md": "$TMP_DIR/ref-work/out/handbook.md"
+  },
+  "radar": {
+    "enabled": true,
+    "base_snapshot": "$ROOT_DIR/radar/examples/demo-radar.json",
+    "merged_snapshot": "$TMP_DIR/ref-work/merged.json",
+    "link_context": true,
+    "adapters": [
+      {"name": "git-rework", "script": "adapters/git_rework.py", "args": ["--repo", "$SAMPLE_REPO", "--days", "7"]},
+      {"name": "csv", "script": "adapters/csv_to_snapshot.py", "args": ["--timeline-csv", "$TMP_DIR/timeline.csv"]}
+    ],
+    "out_html": "$TMP_DIR/ref-work/out/radar.html",
+    "out_tokens": "$TMP_DIR/ref-work/out/tokens.json"
+  }
+}
+EOF
+python3 "$ROOT_DIR/scripts/refresh.py" --sources "$TMP_DIR/sources.test.json" --no-remote-check
+test -f "$TMP_DIR/ref-work/out/context.html"
+test -f "$TMP_DIR/ref-work/out/radar.html"
 
 echo "✅ Team Kit 全模块自动化自测通过！"

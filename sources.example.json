@@ -1,0 +1,60 @@
+{
+  "team_name": "示例研发团队",
+  "note": "复制到 data/sources.json（已被 .gitignore 忽略）并填入公司真实仓路径、看板 CSV、内部平台与注册适配器；切勿在配置中写明文密钥，密钥统一走环境变量。",
+  "context": {
+    "enabled": true,
+    "data_dir": "context/data",
+    "repos": [
+      {
+        "path": "/path/to/your-app-repo",
+        "web_url": "https://git.example.com/team/mobile-app"
+      },
+      {
+        "path": "/path/to/your-bff-repo",
+        "web_url": "https://git.example.com/team/bff-service"
+      }
+    ],
+    "scan_days": 90,
+    "out_html": "dist/context.html",
+    "out_md": "dist/context-handbook.md"
+  },
+  "radar": {
+    "enabled": true,
+    "base_snapshot": "radar/examples/demo-radar.json",
+    "merged_snapshot": "radar/data/snapshot.merged.json",
+    "link_context": true,
+    "adapters": [
+      {
+        "name": "git-rework",
+        "script": "adapters/git_rework.py",
+        "args": ["--repo", "/path/to/your-app-repo", "--days", "7", "--top", "6"]
+      },
+      {
+        "name": "csv-metrics",
+        "script": "adapters/csv_to_snapshot.py",
+        "args": [
+          "--nodes-csv", "radar/data/nodes.csv",
+          "--timeline-csv", "radar/data/timeline.csv"
+        ]
+      }
+    ],
+    "out_html": "dist/radar.html",
+    "out_tokens": "dist/tokens.json"
+  },
+  "platforms": [
+    {
+      "category": "看板与指标",
+      "name": "示例 BI 核心指标看板",
+      "url": "https://bi.example.com/dashboard/1234",
+      "how_to_ingest": "每周一导出近 7 天节点/时间线 CSV 放进 radar/data/，或通过 adapters/local/ 定时拉取",
+      "owner": "数据对接人"
+    },
+    {
+      "category": "稳定性与日志",
+      "name": "示例 APM 崩溃与性能台",
+      "url": "https://apm.example.com/app/overview",
+      "how_to_ingest": "按版本、低端机型过滤聚合指标写入 flow.nodes[].tech",
+      "owner": "客户端值班"
+    }
+  ]
+}

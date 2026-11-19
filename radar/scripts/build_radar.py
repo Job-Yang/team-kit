@@ -16,6 +16,22 @@ from pathlib import Path
 
 DEFAULT_INPUT = Path(__file__).resolve().parent.parent / "examples" / "demo-radar.json"
 
+DEFAULT_THRESHOLDS: dict[str, float | int] = {
+    "crash_danger": 0.25,
+    "p90_danger_ms": 1200,
+    "conv_drop_warn": -5.0,
+    "version_drop_warn": -10.0,
+    "backtrack_warn": 20.0,
+    "rage_click_warn": 8.0,
+    "ai_correct_warn": 12.0,
+    "stream_abort_warn": 15.0,
+    "drop3_warn": 6.0,
+    "api_err_danger": 1.0,
+    "on_time_min": 85.0,
+    "on_time_mom_drop": -15.0,
+    "rework_hot_count": 4,
+}
+
 DESIGN_TOKENS: dict = {
     "locale": {"lang": "zh-CN"},
     "color": {
@@ -300,11 +316,13 @@ def _build_ai_prompt(
 def derive_findings(data: dict, context_bundle: dict | None = None) -> list[dict]:
     """交叉分析业务转化、稳定性、AI 效果与交付指标，生成大白话重点结论与 AI 排查包。"""
     context_bundle = context_bundle or {}
+    th = {**DEFAULT_THRESHOLDS, **(data.get("thresholds") or {})}
     findings: list[dict] = []
-    nodes = data.get("flow", {}).get("nodes", [])
-    changes = data.get("timeline", {}).get("changes", [])
-    eng = data.get("engineering", {})
-    rework_files = eng.get("rework_files", [])
+    flow = data.get("flow") or {}
+    nodes = flow.get("nodes") or []
+    changes = (data.get("timeline") or {}).get("changes") or []
+    eng = data.get("engineering") or {}
+    rework_files = eng.get("rework_files") or []
 
     for node in nodes:
         nid = node["id"]
@@ -319,7 +337,7 @@ def derive_findings(data: dict, context_bundle: dict | None = None) -> list[dict
         ver_slice = slices.get("新老版本") or []
         if len(ver_slice) >= 2:
             diff_v = ver_slice[0]["biz"] - ver_slice[1]["biz"]
-            if diff_v <= -10:
+            if diff_v <= float(th["version_drop_warn"]):
                 gray_drop_note = (
                     f"{ver_slice[0]['label']} 转化 {ver_slice[0]['biz']:.1f}%（"
                     f"较 {ver_slice[1]['label']} 掉 {abs(diff_v):.1f}%），"
@@ -327,8 +345,17 @@ def derive_findings(data: dict, context_bundle: dict | None = None) -> list[dict
                 )
 
         # 规则 1：P0 灰度崩溃与高耗时直接拉低转化
-        if tech.get("crash_rate", 0) >= 0.25 or (
-            biz.get("conv_delta", 0) <= -5 and tech.get("p90_ms", 0) >= 1200
+        crash_rate = float(tech.get("crash_rate") or 0)
+        p90_ms = float(tech.get("p90_ms") or 0)
+        conv_delta = float(biz.get("conv_delta") or 0)
+        api_err = float(tech.get("api_err_rate") or 0)
+        backtrack = float(frus.get("backtrack_rate") or 0)
+        rage_click = float(frus.get("rage_click_rate") or 0)
+        ai_correct = float(frus.get("ai_correct_rate") or 0)
+        stream_abort = float(frus.get("stream_abort_rate") or 0)
+
+        if crash_rate >= float(th["crash_danger"]) or (
+            conv_delta <= float(th["conv_drop_warn"]) and p90_ms >= float(th["p90_danger_ms"])
         ):
             rel_changes = [
                 c for c in changes if c.get("focus_node") == nid or "灰度" in c.get("type", "") or "配置" in c.get("type", "")
@@ -341,7 +368,7 @@ def derive_findings(data: dict, context_bundle: dict | None = None) -> list[dict
             low_mem = next((r for r in (slices.get("高中低机型") or []) if "低" in r.get("label", "")), None)
             low_mem_crash = f"（崩溃 {low_mem['crash']:.2f}%）" if low_mem else ""
             ver_label = ver_slice[0]["label"] if ver_slice else "灰度版本"
-            diff_badge = f"灰度转化 {ver_slice[0]['biz'] - ver_slice[1]['biz']:.1f}%" if len(ver_slice) >= 2 else f"崩溃 {tech.get('crash_rate', 0):.2f}%"
+            diff_badge = f"灰度转化 {ver_slice[0]['biz'] - ver_slice[1]['biz']:.1f}%" if len(ver_slice) >= 2 else f"崩溃 {crash_rate:.2f}%"
 
             steps = [
                 f"按 `{ver_label}` + `低端内存机` 过滤崩溃栈，确认解码或渲染内存峰值出现在哪一步。",
@@ -353,8 +380,8 @@ def derive_findings(data: dict, context_bundle: dict | None = None) -> list[dict
             tag = "灰度崩溃卡住转化"
             ftitle = f"{title} 崩溃和耗时暴涨，直接拉低转化"
             fact = (
-                f"P90 耗时达 {tech.get('p90_ms')}ms，崩溃率 {tech.get('crash_rate'):.2f}%，"
-                f"步骤转化同步下跌 {abs(biz.get('conv_delta', 0)):.1f}%。{gray_drop_note}"
+                f"P90 耗时达 {p90_ms:.0f}ms，崩溃率 {crash_rate:.2f}%，"
+                f"步骤转化同步下跌 {abs(conv_delta):.1f}%。{gray_drop_note}"
             )
             suspect = "关联改动：" + (
                 "；".join(f"{c['date']} {c['type']}「{c['title']}」" for c in rel_changes[:2])
@@ -393,29 +420,32 @@ def derive_findings(data: dict, context_bundle: dict | None = None) -> list[dict
             )
 
         # 规则 2：P1 流程繁琐或弹窗阻断导致大量退回
-        elif (frus.get("backtrack_rate", 0) >= 20 or frus.get("rage_click_rate", 0) >= 8) and tech.get("crash_rate", 0) < 0.1:
+        elif (
+            backtrack >= float(th["backtrack_warn"])
+            or rage_click >= float(th["rage_click_warn"])
+        ) and crash_rate < float(th["crash_danger"]):
             rel_changes = [c for c in changes if c.get("focus_node") == nid or "实验" in c.get("type", "") or "AB" in c.get("type", "")]
             hot_matches = [r["file"] for r in rework_files if any(k in r["file"] for k in ("Submit", "Confirm"))]
             suspect_files = list(dict.fromkeys(rel_files + hot_matches))
             short_files = " 与 ".join(f"`{Path(fp).name}`" for fp in suspect_files[:2]) or "相关前后端处理文件"
             steps = [
                 f"按会话串联上一跳到 `{title}` 的轨迹，拆分单条操作与连续操作各自退回占比。",
-                f"对照近期弹窗或拦截实验与对照组停留时长（当前均长 {biz.get('stay_sec', 0):.1f}s），定位阻断节点。",
+                f"对照近期弹窗或拦截实验与对照组停留时长（当前均长 {float(biz.get('stay_sec') or 0):.1f}s），定位阻断节点。",
                 f"检查 {short_files}，评估将逐条确认合并为批量一次确认的前后端改造成本。",
             ]
             fid = f"f_{nid}_ux"
             sev = "P1"
             tag = "弹窗打断退回"
-            ftitle = f"{title} 接口零异常，但近四成用户中途退回"
+            ftitle = f"{title} 接口零异常，但大量用户中途退回"
             fact = (
-                f"接口报错仅 {tech.get('api_err_rate', 0):.2f}%、P90 {tech.get('p90_ms')}ms 正常，"
-                f"但中途退回率达 {frus.get('backtrack_rate'):.1f}%，连点异常 {frus.get('rage_click_rate'):.1f}%，"
-                f"转化跌 {abs(biz.get('conv_delta', 0)):.1f}%。"
+                f"接口报错仅 {api_err:.2f}%、P90 {p90_ms:.0f}ms 正常，"
+                f"但中途退回率达 {backtrack:.1f}%，连点异常 {rage_click:.1f}%，"
+                f"转化跌 {abs(conv_delta):.1f}%。"
             )
             suspect = "用户连续操作时被强弹窗和繁琐确认流程打断，被迫反复退回或中途放弃。"
             action = "拿此页面数据与产品对齐：验证“批量一次确认”方案，并关闭强阻断弹窗实验。"
-            summary_one_line = f"强弹窗实验打断连续操作节奏，退回率达 {frus.get('backtrack_rate'):.1f}%，建议改为一次确认并撤弹窗。"
-            impact_badge = f"退回率 {frus.get('backtrack_rate'):.1f}%"
+            summary_one_line = f"强弹窗实验打断连续操作节奏，退回率达 {backtrack:.1f}%，建议改为一次确认并撤弹窗。"
+            impact_badge = f"退回率 {backtrack:.1f}%"
             ctx_notes = _match_context_notes(context_bundle, node.get("owner", ""), suspect_files)
             findings.append(
                 {
@@ -446,7 +476,10 @@ def derive_findings(data: dict, context_bundle: dict | None = None) -> list[dict
             )
 
         # 规则 3：P1 AI 识别手改或半路取消率升高
-        if frus.get("ai_correct_rate", 0) >= 12 or frus.get("stream_abort_rate", 0) >= 15:
+        if (
+            ai_correct >= float(th["ai_correct_warn"])
+            or stream_abort >= float(th["stream_abort_warn"])
+        ):
             rel_changes = [c for c in changes if c.get("focus_node") == nid or "Prompt" in c.get("type", "")]
             hot_matches = [r["file"] for r in rework_files if any(k in r["file"] for k in ("Prompt", "Stream", "parse"))]
             suspect_files = list(dict.fromkeys(rel_files + hot_matches))
@@ -455,22 +488,22 @@ def derive_findings(data: dict, context_bundle: dict | None = None) -> list[dict
             steps = [
                 f"抽样 50 条 `{title}` 用户手动修改记录，统计是“字段错位”“漏识别”还是“理解偏差”。",
                 f"比对 `{prompt_file}` 与上一版的输出结构约束，确认多目标场景下字段边界是否清晰。",
-                f"检查首包等待（P90 {tech.get('p90_ms')}ms）与 `{Path(stream_file).name}` 重排抖动是否推高 {frus.get('stream_abort_rate', 0):.1f}% 的半路取消率。",
+                f"检查首包等待（P90 {p90_ms:.0f}ms）与 `{Path(stream_file).name}` 重排抖动是否推高 {stream_abort:.1f}% 的半路取消率。",
             ]
             fid = f"f_{nid}_ai"
             sev = "P1"
             tag = "AI 识别易错"
             ftitle = f"{title} 零崩溃零报错，但手改率与取消率双升"
             fact = (
-                f"识别后用户手动改错率 {frus.get('ai_correct_rate'):.1f}%，"
-                f"流式半路关闭/重发率 {frus.get('stream_abort_rate'):.1f}%（常规告警无感知）。"
+                f"识别后用户手动改错率 {ai_correct:.1f}%，"
+                f"流式半路关闭/重发率 {stream_abort:.1f}%（常规告警无感知）。"
             )
             suspect = "关联近期 Prompt 版本更新：多目标同框时关键字段配对错位增多，叠加流式等待偏长。"
             action = "抽样 50 条手改样本做聚类比对，必要时针对多目标场景回切上一版 Prompt 策略。"
             summary_one_line = (
-                f"识别手改率达 {frus.get('ai_correct_rate'):.1f}%、半路取消 {frus.get('stream_abort_rate'):.1f}%，常规接口告警看不住。"
+                f"识别手改率达 {ai_correct:.1f}%、半路取消 {stream_abort:.1f}%，常规接口告警看不住。"
             )
-            impact_badge = f"手改率 {frus.get('ai_correct_rate'):.1f}%"
+            impact_badge = f"手改率 {ai_correct:.1f}%"
             ctx_notes = _match_context_notes(context_bundle, node.get("owner", ""), suspect_files)
             findings.append(
                 {
@@ -501,8 +534,11 @@ def derive_findings(data: dict, context_bundle: dict | None = None) -> list[dict
             )
 
     # 规则 4：P2 研发按期率跌破警戒且高频返工/等待耗时大
-    alert_teams = [t for t in eng.get("subteams", []) if t.get("on_time_rate", 100) < 85 and t.get("mom_delta", 0) <= -15]
-    hot_rework = [r for r in rework_files if r.get("rework_7d", 0) >= 4]
+    alert_teams = [
+        t for t in eng.get("subteams", [])
+        if t.get("on_time_rate", 100) < float(th["on_time_min"]) and t.get("mom_delta", 0) <= float(th["on_time_mom_drop"])
+    ]
+    hot_rework = [r for r in rework_files if r.get("rework_7d", 0) >= int(th["rework_hot_count"])]
     total_waste = sum(x.get("waste_pd_month", 0) for x in eng.get("time_sinks", []))
     if alert_teams or hot_rework:
         team_desc = "、".join(f"{t['name']}({t['on_time_rate']}%)" for t in alert_teams)
@@ -1898,7 +1934,7 @@ __COLOR_VARS__
                 <path d="M12 9v4M12 17h.01" />
                 <path d="M10.3 3.9L2.4 17.5A1.8 1.8 0 0 0 4 20h16a1.8 1.8 0 0 0 1.6-2.5L13.7 3.9a2 2 0 0 0-3.4 0z" />
               </svg>
-              <span>最该先处理的 4 件事</span>
+              <span id="findings-heading">最该先处理的 4 件事</span>
             </h2>
             <p class="panel-sub">按影响大小和紧急程度排序，点击右侧可直接透视对应页面元素或看 AI 排查思路</p>
           </div>
@@ -2119,6 +2155,11 @@ __COLOR_VARS__
 
 <script>
 const RADAR_DATA = __RADAR_DATA__;
+const TH = Object.assign({
+  crash_danger: 0.25, p90_danger_ms: 1200, conv_drop_warn: -5, version_drop_warn: -10,
+  backtrack_warn: 20, rage_click_warn: 8, ai_correct_warn: 12, stream_abort_warn: 15,
+  drop3_warn: 6, api_err_danger: 1, on_time_min: 85, on_time_mom_drop: -15, rework_hot_count: 4
+}, RADAR_DATA.thresholds || {});
 const FIRST_FINDING = (RADAR_DATA.findings && RADAR_DATA.findings[0]) || null;
 const FIRST_NODE = (RADAR_DATA.flow && RADAR_DATA.flow.nodes && RADAR_DATA.flow.nodes[0]) || null;
 
@@ -2135,15 +2176,16 @@ const state = {
   drawerOpen: false,
   drawerFindingId: (FIRST_FINDING && FIRST_FINDING.id) || null,
   checkedSteps: {},
-  lastFocusEl: null
+  lastFocusEl: null,
+  canvasW: 976,
+  canvasH: 410
 };
 
-const CANVAS_W = 976;
-const CANVAS_H = 410;
 const NODE_W = 176;
 const NODE_H = 112;
-const COL_X = [10, 270, 530, 790];
-const ROW_Y = [10, 144, 278];
+const COL_STEP = 260;
+const ROW_STEP = 134;
+const CANVAS_PAD = 10;
 
 let toastTimer = null;
 
@@ -2152,8 +2194,37 @@ function esc(s) {
 }
 
 function fmtNum(n) {
-  if (n >= 10000) return (n / 10000).toFixed(1) + "w";
-  return String(n);
+  const num = Number(n) || 0;
+  if (num >= 10000) return (num / 10000).toFixed(1) + "w";
+  return String(num);
+}
+
+function emptyStateHtml(msg) {
+  return '<div style="padding:20px 12px;text-align:center;font-size:13px;color:var(--ui-text-faint);">' + esc(msg) + '</div>';
+}
+
+function computeAxis(vals, opts) {
+  const clean = (vals || []).map(Number).filter(Number.isFinite);
+  if (!clean.length) return { min: 0, max: 100, ticks: [0, 33, 66, 100] };
+  const stepBase = (opts && opts.stepBase) || 5;
+  const minSpan = (opts && opts.minSpan) || 12;
+  let lo = Math.min(...clean);
+  let hi = Math.max(...clean);
+  const pad = Math.max(stepBase, (hi - lo) * 0.18);
+  lo = Math.floor((lo - pad) / stepBase) * stepBase;
+  hi = Math.ceil((hi + pad) / stepBase) * stepBase;
+  if (opts && opts.isPct) {
+    lo = Math.max(0, lo);
+    hi = Math.min(100, hi);
+  }
+  if (opts && opts.floorZero) lo = Math.max(0, lo);
+  if (hi - lo < minSpan) {
+    hi = (opts && opts.isPct) ? Math.min(100, lo + minSpan) : lo + minSpan;
+    if ((opts && opts.isPct) && hi - lo < minSpan) lo = Math.max(0, hi - minSpan);
+  }
+  const span = Math.max(1, hi - lo);
+  const ticks = [0, 1, 2, 3].map(i => Math.round(lo + (span * i) / 3));
+  return { min: lo, max: hi, ticks };
 }
 
 function fmtPathBreaks(fp) {
@@ -2248,8 +2319,13 @@ function nodeStatus(node) {
   const t = node.tech || {};
   const b = node.biz || {};
   const f = node.frustration || {};
-  if (t.crash_rate >= 0.25 || (b.conv_delta <= -5 && t.p90_ms >= 1200)) return "danger";
-  if (b.conv_delta <= -5 || f.backtrack_rate >= 20 || f.ai_correct_rate >= 12 || f.rage_click_rate >= 8) return "warn";
+  if (t.crash_rate >= TH.crash_danger || (b.conv_delta <= TH.conv_drop_warn && t.p90_ms >= TH.p90_danger_ms)) return "danger";
+  if (
+    b.conv_delta <= TH.conv_drop_warn ||
+    f.backtrack_rate >= TH.backtrack_warn ||
+    f.ai_correct_rate >= TH.ai_correct_warn ||
+    f.rage_click_rate >= TH.rage_click_warn
+  ) return "warn";
   return "ok";
 }
 
@@ -2258,10 +2334,12 @@ function updateFlowScale() {
   const sizer = document.getElementById("flow-stage-sizer");
   const canvas = document.getElementById("flow-canvas");
   if (!stage || !sizer || !canvas || stage.clientWidth === 0) return;
+  const cw = state.canvasW || 976;
+  const ch = state.canvasH || 410;
   const avail = Math.max(240, stage.clientWidth - 20);
-  const scale = window.innerWidth < 680 ? 0.62 : Math.min(1, avail / CANVAS_W);
-  sizer.style.width = Math.round(CANVAS_W * scale) + "px";
-  sizer.style.height = Math.round(CANVAS_H * scale) + "px";
+  const scale = window.innerWidth < 680 ? 0.62 : Math.min(1, avail / cw);
+  sizer.style.width = Math.round(cw * scale) + "px";
+  sizer.style.height = Math.round(ch * scale) + "px";
   canvas.style.transform = "scale(" + scale.toFixed(4) + ")";
 }
 
@@ -2269,7 +2347,25 @@ function updateFlowScale() {
 
 function renderBentoSignals() {
   const wrap = document.getElementById("bento-strip");
-  wrap.innerHTML = (RADAR_DATA.status_lights || []).map((l, idx) => {
+  let lights = RADAR_DATA.status_lights || [];
+  if (!lights.length) {
+    lights = (RADAR_DATA.findings || []).slice(0, 4).map(f => ({
+      id: f.id,
+      label: f.tag || "关注事项",
+      level: f.severity === "P0" ? "danger" : "warn",
+      metric: f.impact_badge || f.severity,
+      metric_label: f.severity,
+      summary: f.summary_one_line || f.title,
+      focus_tab: f.focus_tab || "flow",
+      focus_node: f.node_id || "",
+      focus_mode: f.mode || "all"
+    }));
+  }
+  if (!lights.length) {
+    wrap.innerHTML = '<div class="bento-cell level-ok" style="grid-column:1 / -1;"><div class="bento-head"><span class="bento-title"><span class="dot-badge" aria-hidden="true"></span>运行状态正常</span><span class="pill ok">正常</span></div><p class="bento-summary">暂无状态摘要或告警指标，已就绪等待补充数据。</p></div>';
+    return;
+  }
+  wrap.innerHTML = lights.map((l, idx) => {
     const isHero = idx === 0;
     const tagTxt = l.level === "danger" ? "建议阻断" : (l.level === "warn" ? "偏高需查" : "正常");
     const pillCls = l.level === "danger" ? "signal" : (l.level === "warn" ? "warn" : "ok");
@@ -2308,8 +2404,16 @@ function renderBentoSignals() {
 
 function renderOverviewFindings() {
   const list = RADAR_DATA.findings || [];
-  document.getElementById("finding-count").textContent = "重点 " + list.length + " 项";
+  const headEl = document.getElementById("findings-heading");
+  if (headEl) {
+    headEl.textContent = list.length ? "最该先处理的 " + list.length + " 件事" : "重点事项清单";
+  }
+  document.getElementById("finding-count").textContent = list.length ? "重点 " + list.length + " 项" : "暂无异常";
   const wrap = document.getElementById("brief-queue");
+  if (!list.length) {
+    wrap.innerHTML = emptyStateHtml("当前窗口未命中高危或明显异常项，可按需切到其他页签巡检细项。");
+    return;
+  }
   wrap.innerHTML = list.map(f => {
     const isDelivery = f.focus_tab === "delivery";
     const goLabel = isDelivery ? "看交付效率 ->" : "看页面细节 ->";
@@ -2348,15 +2452,26 @@ function renderOverviewFindings() {
 }
 
 function renderMiniTimeline() {
-  const tl = RADAR_DATA.timeline;
+  const tl = RADAR_DATA.timeline || {};
   const svg = document.getElementById("mini-timeline-svg");
+  const foot = document.getElementById("mini-timeline-foot");
   const dates = tl.dates || [];
-  const W = 440, H = 132, padL = 36, padR = 46, padT = 18, padB = 22;
+  const convArr = tl.biz_conv || [];
+  const msArr = tl.tech_p90_ms || [];
+  if (!dates.length || !convArr.length || !msArr.length) {
+    svg.innerHTML = "";
+    foot.innerHTML = emptyStateHtml("暂未接入近 7 天转化与耗时时序数据。");
+    return;
+  }
+
+  const W = 440, H = 132, padL = 40, padR = 52, padT = 18, padB = 22;
   const plotW = W - padL - padR, plotH = H - padT - padB;
   const xStep = plotW / Math.max(1, dates.length - 1);
+  const convAxis = computeAxis(convArr, { isPct: true, minSpan: 12, stepBase: 5 });
+  const msAxis = computeAxis(msArr, { floorZero: true, minSpan: 200, stepBase: 50 });
   const cx = i => padL + i * xStep;
-  const cyC = v => padT + plotH - ((v - 45) / 30) * plotH;
-  const cyM = v => padT + plotH - ((v - 800) / 900) * plotH;
+  const cyC = v => padT + plotH - ((v - convAxis.min) / (convAxis.max - convAxis.min)) * plotH;
+  const cyM = v => padT + plotH - ((v - msAxis.min) / (msAxis.max - msAxis.min)) * plotH;
 
   const cs = getComputedStyle(document.documentElement);
   const cGrid = cs.getPropertyValue("--ui-border").trim() || "#232936";
@@ -2370,7 +2485,7 @@ function renderMiniTimeline() {
     '<stop offset="0%" stop-color="' + esc(cInfo) + '" stop-opacity="0.22"/>' +
     '<stop offset="100%" stop-color="' + esc(cInfo) + '" stop-opacity="0.01"/></linearGradient></defs>';
 
-  [48, 60, 72].forEach(v => {
+  [convAxis.ticks[0], convAxis.ticks[1], convAxis.ticks[3]].forEach(v => {
     const y = cyC(v);
     out += '<line x1="' + padL + '" y1="' + y + '" x2="' + (W - padR) + '" y2="' + y + '" stroke="' + esc(cGrid) + '" stroke-dasharray="3,3" />';
   });
@@ -2386,28 +2501,29 @@ function renderMiniTimeline() {
     }
   });
 
-  const convPts = tl.biz_conv.map((v, i) => cx(i) + "," + cyC(v));
+  const convPts = convArr.map((v, i) => cx(i) + "," + cyC(v));
   const areaPts = convPts.join(" ") + " " + cx(dates.length - 1) + "," + (H - padB) + " " + cx(0) + "," + (H - padB);
-  const msPts = tl.tech_p90_ms.map((v, i) => cx(i) + "," + cyM(v)).join(" ");
+  const msPts = msArr.map((v, i) => cx(i) + "," + cyM(v)).join(" ");
   out += '<polygon points="' + areaPts + '" fill="url(#mini-grad)" />';
   out += '<polyline fill="none" stroke="' + esc(cInfo) + '" stroke-width="2.2" points="' + convPts.join(" ") + '" />';
   out += '<polyline fill="none" stroke="' + esc(cSig) + '" stroke-width="1.8" stroke-dasharray="4,3" points="' + msPts + '" />';
 
+  const midIdx = Math.floor((dates.length - 1) / 2);
   dates.forEach((d, i) => {
-    out += '<circle cx="' + cx(i) + '" cy="' + cyC(tl.biz_conv[i]) + '" r="3" fill="' + esc(cSurf) + '" stroke="' + esc(cInfo) + '" stroke-width="1.8" />';
-    if (i === 0 || i === 3 || i === dates.length - 1) {
+    out += '<circle cx="' + cx(i) + '" cy="' + cyC(convArr[i]) + '" r="3" fill="' + esc(cSurf) + '" stroke="' + esc(cInfo) + '" stroke-width="1.8" />';
+    if (i === 0 || i === midIdx || i === dates.length - 1) {
       out += '<text x="' + cx(i) + '" y="' + (H - 4) + '" text-anchor="middle" font-size="11" font-family="SF Mono, Menlo, monospace" fill="' + esc(cMuted) + '">' + esc(d) + '</text>';
     }
   });
-  out += '<text x="' + (padL - 6) + '" y="' + (cyC(tl.biz_conv[0]) + 4) + '" text-anchor="end" font-size="11" font-family="SF Mono, Menlo, monospace" font-weight="700" fill="' + esc(cInfo) + '">' + tl.biz_conv[0] + '%</text>';
-  out += '<text x="' + (W - padR + 6) + '" y="' + (cyC(tl.biz_conv[dates.length - 1]) + 4) + '" text-anchor="start" font-size="11" font-family="SF Mono, Menlo, monospace" font-weight="700" fill="' + esc(cInfo) + '">' + tl.biz_conv[dates.length - 1] + '%</text>';
-  out += '<text x="' + (W - padR + 6) + '" y="' + (cyM(tl.tech_p90_ms[dates.length - 1]) + 4) + '" text-anchor="start" font-size="11" font-family="SF Mono, Menlo, monospace" font-weight="700" fill="' + esc(cSig) + '">' + tl.tech_p90_ms[dates.length - 1] + 'ms</text>';
+  out += '<text x="' + (padL - 6) + '" y="' + (cyC(convArr[0]) + 4) + '" text-anchor="end" font-size="11" font-family="SF Mono, Menlo, monospace" font-weight="700" fill="' + esc(cInfo) + '">' + convArr[0] + '%</text>';
+  out += '<text x="' + (W - padR + 6) + '" y="' + (cyC(convArr[dates.length - 1]) + 4) + '" text-anchor="start" font-size="11" font-family="SF Mono, Menlo, monospace" font-weight="700" fill="' + esc(cInfo) + '">' + convArr[dates.length - 1] + '%</text>';
+  out += '<text x="' + (W - padR + 6) + '" y="' + (cyM(msArr[dates.length - 1]) + 4) + '" text-anchor="start" font-size="11" font-family="SF Mono, Menlo, monospace" font-weight="700" fill="' + esc(cSig) + '">' + msArr[dates.length - 1] + 'ms</text>';
 
   svg.innerHTML = out;
 
-  const firstC = tl.biz_conv[0], lastC = tl.biz_conv[dates.length - 1];
-  const firstM = tl.tech_p90_ms[0], lastM = tl.tech_p90_ms[dates.length - 1];
-  document.getElementById("mini-timeline-foot").innerHTML =
+  const firstC = convArr[0], lastC = convArr[dates.length - 1];
+  const firstM = msArr[0], lastM = msArr[dates.length - 1];
+  foot.innerHTML =
     '<span>转化率 <strong class="mono">' + firstC + '% -> ' + lastC + '%</strong></span>' +
     '<span>采集 P90 <strong class="mono">' + firstM + 'ms -> ' + lastM + 'ms</strong>（虚线）</span>';
 }
@@ -2415,13 +2531,18 @@ function renderMiniTimeline() {
 function renderOverviewSinks() {
   const eng = RADAR_DATA.engineering || {};
   const sinks = eng.time_sinks || [];
-  const maxPd = Math.max(1, ...sinks.map(s => s.waste_pd_month));
-  document.getElementById("overview-sinks").innerHTML = sinks.map(s => {
-    const pct = Math.round((s.waste_pd_month / maxPd) * 100);
-    return '<div><div class="sink-row-top"><span class="sink-row-name">' + esc(s.item) + '</span>' +
-      '<span class="sink-row-pd">' + s.waste_pd_month.toFixed(1) + ' 人天/月</span></div>' +
-      '<div class="bar-track"><div class="bar-fill bad" style="width:' + pct + '%"></div></div></div>';
-  }).join("");
+  const sinksEl = document.getElementById("overview-sinks");
+  if (!sinks.length) {
+    sinksEl.innerHTML = emptyStateHtml("暂未统计研发等待与重复消耗事项。");
+  } else {
+    const maxPd = Math.max(1, ...sinks.map(s => s.waste_pd_month || 0));
+    sinksEl.innerHTML = sinks.map(s => {
+      const pct = Math.round(((s.waste_pd_month || 0) / maxPd) * 100);
+      return '<div><div class="sink-row-top"><span class="sink-row-name">' + esc(s.item) + '</span>' +
+        '<span class="sink-row-pd">' + Number(s.waste_pd_month || 0).toFixed(1) + ' 人天/月</span></div>' +
+        '<div class="bar-track"><div class="bar-fill bad" style="width:' + pct + '%"></div></div></div>';
+    }).join("");
+  }
 
   const alertTeam = (eng.subteams || []).find(t => t.status === "alert");
   const alertEl = document.getElementById("overview-team-alert");
@@ -2436,12 +2557,44 @@ function renderOverviewSinks() {
 /* ---------- Tab 2: 页面转化（流向 + 人群 + 仿真手机元素透视） ---------- */
 
 function renderFlow(animate) {
-  const nodes = RADAR_DATA.flow.nodes;
-  const edges = RADAR_DATA.flow.edges;
+  const flow = RADAR_DATA.flow || {};
+  const nodes = flow.nodes || [];
+  const edges = flow.edges || [];
+  const nodesWrap = document.getElementById("flow-nodes");
+  const svg = document.getElementById("flow-svg");
+
+  if (!nodes.length) {
+    state.canvasW = 640;
+    state.canvasH = 220;
+    document.getElementById("flow-canvas").style.width = state.canvasW + "px";
+    document.getElementById("flow-canvas").style.height = state.canvasH + "px";
+    svg.setAttribute("viewBox", "0 0 " + state.canvasW + " " + state.canvasH);
+    svg.innerHTML = "";
+    nodesWrap.innerHTML = emptyStateHtml("暂未配置页面链路节点数据，请先补充 flow.nodes。");
+    updateFlowScale();
+    return;
+  }
+
+  const maxCol = Math.max(0, ...nodes.map(n => Number(n.col) || 0));
+  const maxRow = Math.max(0, ...nodes.map(n => Number(n.row) || 0));
+  const canvasW = Math.max(480, CANVAS_PAD * 2 + maxCol * COL_STEP + NODE_W);
+  const canvasH = Math.max(220, CANVAS_PAD * 2 + maxRow * ROW_STEP + NODE_H + 10);
+  state.canvasW = canvasW;
+  state.canvasH = canvasH;
+
+  const canvasEl = document.getElementById("flow-canvas");
+  canvasEl.style.width = canvasW + "px";
+  canvasEl.style.height = canvasH + "px";
+  svg.setAttribute("viewBox", "0 0 " + canvasW + " " + canvasH);
+  svg.style.width = canvasW + "px";
+  svg.style.height = canvasH + "px";
+
   const nodePos = {};
   const connected = {};
   nodes.forEach(n => {
-    nodePos[n.id] = { x: COL_X[n.col] || 10, y: ROW_Y[n.row] || 10, w: NODE_W, h: NODE_H };
+    const col = Number(n.col) || 0;
+    const row = Number(n.row) || 0;
+    nodePos[n.id] = { x: CANVAS_PAD + col * COL_STEP, y: CANVAS_PAD + row * ROW_STEP, w: NODE_W, h: NODE_H };
   });
   edges.forEach(e => {
     if (e.from === state.selectedNodeId || e.to === state.selectedNodeId) {
@@ -2451,7 +2604,6 @@ function renderFlow(animate) {
   });
   connected[state.selectedNodeId] = true;
 
-  const nodesWrap = document.getElementById("flow-nodes");
   if (animate) {
     nodesWrap.classList.remove("blur-enter");
     void nodesWrap.offsetWidth;
@@ -2462,37 +2614,41 @@ function renderFlow(animate) {
     const pos = nodePos[n.id];
     const st = nodeStatus(n);
     const sel = n.id === state.selectedNodeId ? "selected" : (connected[n.id] ? "" : "dimmed");
-    const b = n.biz, t = n.tech, f = n.frustration;
-    const vol = state.caliber === "uv" ? fmtNum(b.uv) + " 人" : fmtNum(b.pv) + " 次";
+    const b = n.biz || {}, t = n.tech || {}, f = n.frustration || {};
+    const uv = Number(b.uv || 0), pv = Number(b.pv || 0);
+    const convRate = Number(b.conv_rate || 0), convDelta = Number(b.conv_delta || 0), staySec = Number(b.stay_sec || 0);
+    const p90 = Number(t.p90_ms || 0), crash = Number(t.crash_rate || 0), drop3 = Number(t.drop3_rate || 0), apiErr = Number(t.api_err_rate || 0);
+    const backtrack = Number(f.backtrack_rate || 0), rage = Number(f.rage_click_rate || 0), aiCorr = Number(f.ai_correct_rate || 0), abortRate = Number(f.stream_abort_rate || 0);
+    const vol = state.caliber === "uv" ? fmtNum(uv) + " 人" : fmtNum(pv) + " 次";
 
     let kvs = [];
     if (state.mode === "biz") {
       kvs = [
         ["规模", vol, ""],
-        ["转化", b.conv_rate.toFixed(1) + "%", b.conv_delta <= -5 ? "v-bad" : "v-ok"],
-        ["较基线", (b.conv_delta >= 0 ? "+" : "") + b.conv_delta.toFixed(1) + "%", b.conv_delta <= -5 ? "v-bad" : ""],
-        ["停留", b.stay_sec.toFixed(1) + "s", ""]
+        ["转化", convRate.toFixed(1) + "%", convDelta <= TH.conv_drop_warn ? "v-bad" : "v-ok"],
+        ["较基线", (convDelta >= 0 ? "+" : "") + convDelta.toFixed(1) + "%", convDelta <= TH.conv_drop_warn ? "v-bad" : ""],
+        ["停留", staySec.toFixed(1) + "s", ""]
       ];
     } else if (state.mode === "tech") {
       kvs = [
-        ["P90耗时", t.p90_ms + "ms", t.p90_ms >= 1200 ? "v-bad" : ""],
-        ["崩溃", t.crash_rate.toFixed(2) + "%", t.crash_rate >= 0.25 ? "v-bad" : "v-ok"],
-        ["掉帧", t.drop3_rate.toFixed(1) + "%", t.drop3_rate >= 6 ? "v-warn" : ""],
-        ["报错", t.api_err_rate.toFixed(2) + "%", t.api_err_rate >= 1 ? "v-bad" : ""]
+        ["P90耗时", p90 + "ms", p90 >= TH.p90_danger_ms ? "v-bad" : ""],
+        ["崩溃", crash.toFixed(2) + "%", crash >= TH.crash_danger ? "v-bad" : "v-ok"],
+        ["掉帧", drop3.toFixed(1) + "%", drop3 >= TH.drop3_warn ? "v-warn" : ""],
+        ["报错", apiErr.toFixed(2) + "%", apiErr >= TH.api_err_danger ? "v-bad" : ""]
       ];
     } else if (state.mode === "frustration") {
       kvs = [
-        ["退回", f.backtrack_rate.toFixed(1) + "%", f.backtrack_rate >= 20 ? "v-warn" : ""],
-        ["连点", f.rage_click_rate.toFixed(1) + "%", f.rage_click_rate >= 8 ? "v-warn" : ""],
-        ["AI改错", f.ai_correct_rate.toFixed(1) + "%", f.ai_correct_rate >= 12 ? "v-bad" : ""],
-        ["半路关", f.stream_abort_rate.toFixed(1) + "%", f.stream_abort_rate >= 15 ? "v-warn" : ""]
+        ["退回", backtrack.toFixed(1) + "%", backtrack >= TH.backtrack_warn ? "v-warn" : ""],
+        ["连点", rage.toFixed(1) + "%", rage >= TH.rage_click_warn ? "v-warn" : ""],
+        ["AI改错", aiCorr.toFixed(1) + "%", aiCorr >= TH.ai_correct_warn ? "v-bad" : ""],
+        ["半路关", abortRate.toFixed(1) + "%", abortRate >= TH.stream_abort_warn ? "v-warn" : ""]
       ];
     } else {
       kvs = [
-        ["转化变", (b.conv_delta >= 0 ? "+" : "") + b.conv_delta.toFixed(1) + "%", b.conv_delta <= -5 ? "v-bad" : "v-ok"],
-        ["崩溃", t.crash_rate.toFixed(2) + "%", t.crash_rate >= 0.25 ? "v-bad" : ""],
-        ["退回", f.backtrack_rate.toFixed(1) + "%", f.backtrack_rate >= 20 ? "v-warn" : ""],
-        ["AI改错", f.ai_correct_rate.toFixed(1) + "%", f.ai_correct_rate >= 12 ? "v-bad" : ""]
+        ["转化变", (convDelta >= 0 ? "+" : "") + convDelta.toFixed(1) + "%", convDelta <= TH.conv_drop_warn ? "v-bad" : "v-ok"],
+        ["崩溃", crash.toFixed(2) + "%", crash >= TH.crash_danger ? "v-bad" : ""],
+        ["退回", backtrack.toFixed(1) + "%", backtrack >= TH.backtrack_warn ? "v-warn" : ""],
+        ["AI改错", aiCorr.toFixed(1) + "%", aiCorr >= TH.ai_correct_warn ? "v-bad" : ""]
       ];
     }
 
@@ -2502,7 +2658,7 @@ function renderFlow(animate) {
     const stTxt = st === "danger" ? "高危" : (st === "warn" ? "异常" : "正常");
 
     return '<button type="button" class="flow-node status-' + st + ' ' + sel + '" data-id="' + esc(n.id) + '" style="left:' + pos.x + 'px;top:' + pos.y + 'px;" aria-pressed="' + (n.id === state.selectedNodeId) + '">' +
-      '<div class="node-top"><span>' + esc(n.stage) + '</span><span class="node-status-tag ' + st + '">' + stTxt + '</span></div>' +
+      '<div class="node-top"><span>' + esc(n.stage || "节点") + '</span><span class="node-status-tag ' + st + '">' + stTxt + '</span></div>' +
       '<div class="node-title">' + esc(n.title) + '</div>' +
       '<div class="node-metrics">' + kvHtml + '</div></button>';
   }).join("");
@@ -2521,7 +2677,6 @@ function renderFlow(animate) {
     });
   });
 
-  const svg = document.getElementById("flow-svg");
   const cs = getComputedStyle(document.documentElement);
   const cEdge = cs.getPropertyValue("--ui-border-strong").trim() || "#343E52";
   const cBad = cs.getPropertyValue("--ui-signal").trim() || "#F97316";
@@ -2546,9 +2701,9 @@ function renderFlow(animate) {
       x1 = a.x + a.w; y1 = a.y + a.h / 2;
       x2 = b.x - 3; y2 = b.y + b.h / 2;
     }
-    const ctr = state.caliber === "uv" ? e.uv_ctr : e.pv_ctr;
-    const delta = state.caliber === "uv" ? e.uv_delta : e.pv_delta;
-    const isBad = delta <= -5;
+    const ctr = Number(state.caliber === "uv" ? e.uv_ctr : e.pv_ctr) || 0;
+    const delta = Number(state.caliber === "uv" ? e.uv_delta : e.pv_delta) || 0;
+    const isBad = delta <= TH.conv_drop_warn;
     const isRel = e.from === state.selectedNodeId || e.to === state.selectedNodeId;
     const stroke = isBad ? cBad : cEdge;
     const midX = (x1 + x2) / 2;
@@ -2573,18 +2728,23 @@ function renderFlow(animate) {
 
 function renderDrilldown() {
   const box = document.getElementById("drilldown-box");
-  const node = RADAR_DATA.flow.nodes.find(n => n.id === state.selectedNodeId);
+  const node = ((RADAR_DATA.flow && RADAR_DATA.flow.nodes) || []).find(n => n.id === state.selectedNodeId);
   if (!node) { box.innerHTML = ""; return; }
 
   const slices = node.slices || {};
+  const dims = Object.keys(slices);
+  if (!dims.length) {
+    box.innerHTML = emptyStateHtml("当前页面暂未接入版本 / 机型 / 新老用户对比数据。");
+    return;
+  }
   const shortLbl = s => s.replace(/\\(5%\\)/g, "").replace("老用户（连续提交）", "老用户连提").replace("首次使用新客", "首次新客");
-  const colsHtml = Object.keys(slices).map(dim => {
-    const rows = slices[dim].map(r => {
-      const isBad = r.crash >= 0.25 || r.biz < 55;
+  const colsHtml = dims.map(dim => {
+    const rows = (slices[dim] || []).map(r => {
+      const isBad = r.crash >= TH.crash_danger || r.biz < 55;
       const fillCls = isBad ? "bad" : (r.biz >= 70 ? "ok" : "");
       return '<div class="slice-row">' +
-        '<div class="slice-label"><span>' + esc(shortLbl(r.label)) + '</span><span class="slice-val">' + r.biz.toFixed(1) + '% · ' + r.tech_ms + 'ms · ' + r.crash.toFixed(2) + '%</span></div>' +
-        '<div class="bar-track"><div class="bar-fill ' + fillCls + '" style="width:' + Math.min(100, Math.max(8, r.biz)) + '%"></div></div></div>';
+        '<div class="slice-label"><span>' + esc(shortLbl(r.label)) + '</span><span class="slice-val">' + Number(r.biz || 0).toFixed(1) + '% · ' + (r.tech_ms || 0) + 'ms · ' + Number(r.crash || 0).toFixed(2) + '%</span></div>' +
+        '<div class="bar-track"><div class="bar-fill ' + fillCls + '" style="width:' + Math.min(100, Math.max(8, Number(r.biz || 0))) + '%"></div></div></div>';
     }).join("");
     return '<div class="slice-col"><h3>' + esc(dim) + '</h3>' + rows + '</div>';
   }).join("");
@@ -2593,8 +2753,18 @@ function renderDrilldown() {
 }
 
 function renderSimulator() {
-  const node = RADAR_DATA.flow.nodes.find(n => n.id === state.selectedNodeId);
-  if (!node) return;
+  const nodes = (RADAR_DATA.flow && RADAR_DATA.flow.nodes) || [];
+  const node = nodes.find(n => n.id === state.selectedNodeId);
+  const screen = document.getElementById("phone-screen");
+  const detailCol = document.getElementById("el-detail-col");
+  if (!node) {
+    document.getElementById("sim-page-title").textContent = "仿真页面 · 元素级透视";
+    document.getElementById("sim-page-sub").textContent = "暂未选中页面节点";
+    document.getElementById("sim-head-actions").innerHTML = "";
+    screen.innerHTML = emptyStateHtml("暂无页面数据");
+    detailCol.innerHTML = emptyStateHtml("暂无元素明细");
+    return;
+  }
   const elements = node.elements || [];
   let curEl = elements.find(e => e.id === state.selectedElementId);
   if (!curEl && elements.length) {
@@ -2619,22 +2789,23 @@ function renderSimulator() {
 
   const kindMap = { header: "顶栏", hero: "主画布", card: "内容卡", modal: "阻断弹窗", action: "主按钮", tabbar: "底栏" };
   const elBadge = e => {
-    if (state.mode === "tech") return e.p90_ms + "ms / " + e.err_rate.toFixed(2) + "%";
-    if (state.mode === "frustration") return "卡壳 " + e.issue_rate.toFixed(1) + "%";
-    return "CTR " + e.ctr.toFixed(1) + "%";
+    if (state.mode === "tech") return (e.p90_ms || 0) + "ms / " + Number(e.err_rate || 0).toFixed(2) + "%";
+    if (state.mode === "frustration") return "卡壳 " + Number(e.issue_rate || 0).toFixed(1) + "%";
+    return "CTR " + Number(e.ctr || 0).toFixed(1) + "%";
   };
 
-  const screen = document.getElementById("phone-screen");
   screen.innerHTML =
     '<div class="phone-statusbar"><span class="mono">9:41</span><span class="phone-notch" aria-hidden="true"></span><span class="mono">5G</span></div>' +
     '<div class="phone-app-title">' + esc(node.title) + '</div>' +
-    elements.map(e => {
-      const sel = curEl && curEl.id === e.id;
-      return '<button type="button" class="phone-el-btn kind-' + esc(e.kind) + ' status-' + esc(e.status) + '" data-el-id="' + esc(e.id) + '" aria-pressed="' + sel + '">' +
-        '<div class="el-top-row"><span class="el-kind-tag">' + esc(kindMap[e.kind] || "模块") + '</span>' +
-        '<span class="el-metric-badge ' + esc(e.status) + '">' + esc(elBadge(e)) + '</span></div>' +
-        '<div class="el-name">' + esc(e.name) + '</div></button>';
-    }).join("");
+    (elements.length
+      ? elements.map(e => {
+          const sel = curEl && curEl.id === e.id;
+          return '<button type="button" class="phone-el-btn kind-' + esc(e.kind) + ' status-' + esc(e.status) + '" data-el-id="' + esc(e.id) + '" aria-pressed="' + sel + '">' +
+            '<div class="el-top-row"><span class="el-kind-tag">' + esc(kindMap[e.kind] || "模块") + '</span>' +
+            '<span class="el-metric-badge ' + esc(e.status) + '">' + esc(elBadge(e)) + '</span></div>' +
+            '<div class="el-name">' + esc(e.name) + '</div></button>';
+        }).join("")
+      : emptyStateHtml("当前页面暂未录入按钮/卡片级埋点元素。"));
 
   screen.querySelectorAll(".phone-el-btn").forEach(btn => {
     btn.addEventListener("click", () => {
@@ -2643,11 +2814,11 @@ function renderSimulator() {
     });
   });
 
-  const detailCol = document.getElementById("el-detail-col");
-  if (!curEl) { detailCol.innerHTML = ""; return; }
+  if (!curEl) { detailCol.innerHTML = emptyStateHtml("在 snapshots 中补充该页面的 elements 列表后，可在此查看按钮点击率、埋点事件和代码路径。"); return; }
   const ratio = state.caliber === "pv" ? 1.55 : 1;
-  const expText = fmtNum(Math.round(curEl.exposure * ratio)) + (state.caliber === "pv" ? " 次" : " 人");
-  const deltaStr = (curEl.ctr_delta >= 0 ? "+" : "") + curEl.ctr_delta.toFixed(1) + "%";
+  const expText = fmtNum(Math.round((curEl.exposure || 0) * ratio)) + (state.caliber === "pv" ? " 次" : " 人");
+  const ctrDelta = Number(curEl.ctr_delta || 0);
+  const deltaStr = (ctrDelta >= 0 ? "+" : "") + ctrDelta.toFixed(1) + "%";
   const stPill = curEl.status === "danger" ? '<span class="pill signal">重点异常</span>' : (curEl.status === "warn" ? '<span class="pill warn">偏高需看</span>' : '<span class="pill ok">正常</span>');
 
   const chipsHtml = elements.map((e, i) =>
@@ -2659,15 +2830,15 @@ function renderSimulator() {
     '<div class="el-detail-card">' +
     '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;"><h3 class="el-detail-title">' + esc(curEl.name) + '</h3>' + stPill + '</div>' +
     '<div class="el-kpi-grid">' +
-    '<div class="el-kpi-box"><span class="el-kpi-label">点击率 CTR</span><div class="el-kpi-val ' + (curEl.ctr_delta <= -5 ? 'bad' : 'ok') + '">' + curEl.ctr.toFixed(1) + '%</div><span class="el-kpi-label">较基线 ' + deltaStr + '</span></div>' +
-    '<div class="el-kpi-box"><span class="el-kpi-label">耗时 / 卡壳</span><div class="el-kpi-val ' + (curEl.status === 'danger' ? 'bad' : '') + '">' + curEl.p90_ms + 'ms</div><span class="el-kpi-label">异常卡壳 ' + curEl.issue_rate.toFixed(1) + '%</span></div>' +
+    '<div class="el-kpi-box"><span class="el-kpi-label">点击率 CTR</span><div class="el-kpi-val ' + (ctrDelta <= TH.conv_drop_warn ? 'bad' : 'ok') + '">' + Number(curEl.ctr || 0).toFixed(1) + '%</div><span class="el-kpi-label">较基线 ' + deltaStr + '</span></div>' +
+    '<div class="el-kpi-box"><span class="el-kpi-label">耗时 / 卡壳</span><div class="el-kpi-val ' + (curEl.status === 'danger' ? 'bad' : '') + '">' + (curEl.p90_ms || 0) + 'ms</div><span class="el-kpi-label">异常卡壳 ' + Number(curEl.issue_rate || 0).toFixed(1) + '%</span></div>' +
     '</div>' +
     '<div class="el-meta-rows">' +
-    '<div>曝光量：<strong class="mono">' + esc(expText) + '</strong> ｜ 错误率：<strong class="mono">' + curEl.err_rate.toFixed(2) + '%</strong></div>' +
-    '<div>埋点事件：<span class="inline-code">' + esc(curEl.event) + '</span></div>' +
-    '<div>代码位置：<button type="button" class="code-chip" data-copy-el-file="' + esc(curEl.code_file) + '" title="点击复制路径">' + fmtPathBreaks(curEl.code_file) + '</button></div>' +
+    '<div>曝光量：<strong class="mono">' + esc(expText) + '</strong> ｜ 错误率：<strong class="mono">' + Number(curEl.err_rate || 0).toFixed(2) + '%</strong></div>' +
+    '<div>埋点事件：<span class="inline-code">' + esc(curEl.event || "未登记") + '</span></div>' +
+    '<div>代码位置：<button type="button" class="code-chip" data-copy-el-file="' + esc(curEl.code_file || "") + '" title="点击复制路径">' + fmtPathBreaks(curEl.code_file || "待补代码路径") + '</button></div>' +
     '</div>' +
-    '<div class="el-note-box ' + esc(curEl.status) + '"><strong>分析说明：</strong>' + esc(curEl.note) + '</div>' +
+    '<div class="el-note-box ' + esc(curEl.status) + '"><strong>分析说明：</strong>' + esc(curEl.note || "暂无备注") + '</div>' +
     '</div>';
 
   detailCol.querySelectorAll("[data-chip-el]").forEach(btn => {
@@ -2681,7 +2852,7 @@ function renderSimulator() {
   if (cpBtn) {
     cpBtn.addEventListener("click", () => {
       const fp = cpBtn.getAttribute("data-copy-el-file");
-      copyTextSafe(fp, "已复制代码路径：" + fp);
+      if (fp) copyTextSafe(fp, "已复制代码路径：" + fp);
     });
   }
 }
@@ -2689,7 +2860,7 @@ function renderSimulator() {
 /* ---------- Tab 3: 上线变动 ---------- */
 
 function renderChangeFilters() {
-  const changes = RADAR_DATA.timeline.changes || [];
+  const changes = (RADAR_DATA.timeline && RADAR_DATA.timeline.changes) || [];
   const types = ["全部", ...Array.from(new Set(changes.map(c => c.type)))];
   const bar = document.getElementById("change-filter-bar");
   bar.innerHTML = types.map(tp =>
@@ -2705,19 +2876,32 @@ function renderChangeFilters() {
 }
 
 function renderTimeline(showTip) {
-  const tl = RADAR_DATA.timeline;
+  const tl = RADAR_DATA.timeline || {};
   const svg = document.getElementById("timeline-svg");
   const tooltip = document.getElementById("chart-tooltip");
-  const dates = tl.dates;
+  const chWrap = document.getElementById("change-list");
+  const dates = tl.dates || [];
+  const convArr = tl.biz_conv || [];
+  const msArr = tl.tech_p90_ms || [];
+  const crashArr = tl.crash_rate || [];
+  const changes = tl.changes || [];
+
+  if (!dates.length || !convArr.length || !msArr.length) {
+    svg.innerHTML = "";
+    tooltip.setAttribute("data-show", "false");
+    chWrap.innerHTML = emptyStateHtml("暂未接入上线变动与每日指标时间线数据。");
+    return;
+  }
+
   const W = 720, H = 276, padL = 56, padR = 78, padT = 32, padB = 34;
   const plotW = W - padL - padR, plotH = H - padT - padB;
   const xStep = plotW / Math.max(1, dates.length - 1);
 
-  const convMin = 45, convMax = 75;
-  const msMin = 800, msMax = 1700;
+  const convAxis = computeAxis(convArr, { isPct: true, minSpan: 15, stepBase: 5 });
+  const msAxis = computeAxis(msArr, { floorZero: true, minSpan: 300, stepBase: 50 });
   const cx = i => padL + i * xStep;
-  const cyConv = v => padT + plotH - ((v - convMin) / (convMax - convMin)) * plotH;
-  const cyMs = v => padT + plotH - ((v - msMin) / (msMax - msMin)) * plotH;
+  const cyConv = v => padT + plotH - ((v - convAxis.min) / (convAxis.max - convAxis.min)) * plotH;
+  const cyMs = v => padT + plotH - ((v - msAxis.min) / (msAxis.max - msAxis.min)) * plotH;
 
   const cs = getComputedStyle(document.documentElement);
   const cGrid = cs.getPropertyValue("--ui-border").trim() || "#232936";
@@ -2733,8 +2917,8 @@ function renderTimeline(showTip) {
     '<stop offset="0%" stop-color="' + esc(cInfo) + '" stop-opacity="0.22"/>' +
     '<stop offset="100%" stop-color="' + esc(cInfo) + '" stop-opacity="0.01"/></linearGradient></defs>';
 
-  const yTicksConv = [45, 55, 65, 75];
-  const yTicksMs = [800, 1100, 1400, 1700];
+  const yTicksConv = convAxis.ticks;
+  const yTicksMs = msAxis.ticks;
   for (let g = 0; g < yTicksConv.length; g++) {
     const y = cyConv(yTicksConv[g]);
     out += '<line x1="' + padL + '" y1="' + y + '" x2="' + (W - padR) + '" y2="' + y + '" stroke="' + esc(cGrid) + '" stroke-dasharray="3,3" />' +
@@ -2747,7 +2931,7 @@ function renderTimeline(showTip) {
     out += '<text x="' + cx(i) + '" y="' + (H - 10) + '" text-anchor="middle" font-size="12" font-family="SF Mono, Menlo, monospace" font-weight="' + (isSel ? '700' : '500') + '" fill="' + esc(isSel ? cInfo : cMuted) + '">' + esc(d) + '</text>';
   });
 
-  const visibleChanges = tl.changes.filter(c => state.changeFilter === "全部" || c.type === state.changeFilter);
+  const visibleChanges = changes.filter(c => state.changeFilter === "全部" || c.type === state.changeFilter);
   const dateIdx = {};
   dates.forEach((d, i) => { dateIdx[d] = i; });
   const seenDate = {};
@@ -2763,23 +2947,25 @@ function renderTimeline(showTip) {
     }
   });
 
-  const selX = cx(state.selectedDayIdx);
+  const safeDayIdx = Math.min(Math.max(0, state.selectedDayIdx), dates.length - 1);
+  state.selectedDayIdx = safeDayIdx;
+  const selX = cx(safeDayIdx);
   out += '<line x1="' + selX + '" y1="' + padT + '" x2="' + selX + '" y2="' + (H - padB) + '" stroke="' + esc(cInfo) + '" stroke-width="1.5" opacity="0.65" />';
 
-  const convPts = tl.biz_conv.map((v, i) => cx(i) + "," + cyConv(v));
+  const convPts = convArr.map((v, i) => cx(i) + "," + cyConv(v));
   const areaPts = convPts.join(" ") + " " + cx(dates.length - 1) + "," + (H - padB) + " " + cx(0) + "," + (H - padB);
-  const msPts = tl.tech_p90_ms.map((v, i) => cx(i) + "," + cyMs(v)).join(" ");
+  const msPts = msArr.map((v, i) => cx(i) + "," + cyMs(v)).join(" ");
   out += '<polygon points="' + areaPts + '" fill="url(#conv-area-grad)" />';
   out += '<polyline fill="none" stroke="' + esc(cInfo) + '" stroke-width="2.5" stroke-linejoin="round" points="' + convPts.join(" ") + '" />';
   out += '<polyline fill="none" stroke="' + esc(cSig) + '" stroke-width="2.2" stroke-dasharray="6,4" stroke-linejoin="round" points="' + msPts + '" />';
 
-  tl.biz_conv.forEach((v, i) => {
-    const act = i === state.selectedDayIdx;
+  convArr.forEach((v, i) => {
+    const act = i === safeDayIdx;
     const isLast = i === dates.length - 1;
     const tx = isLast ? (cx(i) - 6) : cx(i);
     const anchor = isLast ? "end" : "middle";
     out += '<circle cx="' + cx(i) + '" cy="' + cyConv(v) + '" r="' + (act ? 6 : 4) + '" fill="' + esc(act ? cInfo : cSurf) + '" stroke="' + esc(cInfo) + '" stroke-width="2" />';
-    out += '<circle cx="' + cx(i) + '" cy="' + cyMs(tl.tech_p90_ms[i]) + '" r="' + (act ? 5.5 : 3.5) + '" fill="' + esc(act ? cSig : cSurf) + '" stroke="' + esc(cSig) + '" stroke-width="2" />';
+    out += '<circle cx="' + cx(i) + '" cy="' + cyMs(msArr[i]) + '" r="' + (act ? 5.5 : 3.5) + '" fill="' + esc(act ? cSig : cSurf) + '" stroke="' + esc(cSig) + '" stroke-width="2" />';
     out += '<text x="' + tx + '" y="' + (cyConv(v) - 10) + '" text-anchor="' + anchor + '" font-size="11" font-family="SF Mono, Menlo, monospace" font-weight="700" stroke="' + esc(cSurf) + '" stroke-width="4" paint-order="stroke" fill="' + esc(cInfo) + '">' + v + '%</text>';
   });
 
@@ -2795,17 +2981,21 @@ function renderTimeline(showTip) {
     rect.addEventListener("click", () => { state.selectedDayIdx = idx; renderTimeline(true); });
   });
 
-  const activeDate = dates[state.selectedDayIdx];
+  const activeDate = dates[safeDayIdx];
   const dayChanges = visibleChanges.filter(c => c.date === activeDate);
   if (showTip && activeDate) {
     const cStr = dayChanges.length ? " ｜ 当日变动：" + dayChanges.map(c => c.type).join("、") : "";
-    tooltip.innerHTML = '<strong>' + esc(activeDate) + '</strong> · 转化 <span class="mono">' + tl.biz_conv[state.selectedDayIdx] + '%</span> · P90 <span class="mono">' + tl.tech_p90_ms[state.selectedDayIdx] + 'ms</span> · 崩溃 <span class="mono">' + tl.crash_rate[state.selectedDayIdx].toFixed(2) + '%</span>' + esc(cStr);
+    const crashVal = Number(crashArr[safeDayIdx] || 0).toFixed(2);
+    tooltip.innerHTML = '<strong>' + esc(activeDate) + '</strong> · 转化 <span class="mono">' + convArr[safeDayIdx] + '%</span> · P90 <span class="mono">' + msArr[safeDayIdx] + 'ms</span> · 崩溃 <span class="mono">' + crashVal + '%</span>' + esc(cStr);
     tooltip.setAttribute("data-show", "true");
   } else {
     tooltip.setAttribute("data-show", "false");
   }
 
-  const chWrap = document.getElementById("change-list");
+  if (!visibleChanges.length) {
+    chWrap.innerHTML = emptyStateHtml("当前筛选条件下暂无上线变动记录。");
+    return;
+  }
   chWrap.innerHTML = visibleChanges.map((c, idx) => {
     const cls = c.date === activeDate ? "highlight" : "";
     const focusBtn = c.focus_node
@@ -2841,62 +3031,73 @@ function renderTimeline(showTip) {
 function renderSparkBars(vals, status) {
   if (!vals || !vals.length) return "";
   const w = 68, h = 22, bw = 8, gap = 3;
-  const minV = 60, maxV = 100;
+  const nums = vals.map(Number).filter(Number.isFinite);
+  const minV = Math.max(0, Math.min(...nums) - 10);
+  const maxV = Math.max(100, ...nums);
+  const span = Math.max(1, maxV - minV);
   const cls = status === "alert" ? "var(--ui-signal)" : (status === "watch" ? "var(--ui-warn)" : "var(--ui-accent)");
-  const bars = vals.map((v, i) => {
-    const ratio = Math.max(0.15, Math.min(1, (v - minV) / (maxV - minV)));
+  const bars = nums.map((v, i) => {
+    const ratio = Math.max(0.15, Math.min(1, (v - minV) / span));
     const bh = Math.round(ratio * (h - 2));
     const x = i * (bw + gap);
     const y = h - bh;
-    const op = i === vals.length - 1 ? "1" : "0.45";
+    const op = i === nums.length - 1 ? "1" : "0.45";
     return '<rect x="' + x + '" y="' + y + '" width="' + bw + '" height="' + bh + '" rx="2" fill="' + cls + '" opacity="' + op + '" />';
   }).join("");
   return '<svg width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '" aria-hidden="true">' + bars + '</svg>';
 }
 
 function renderDelivery() {
-  const eng = RADAR_DATA.engineering;
-  const totalWaste = (eng.time_sinks || []).reduce((acc, s) => acc + (s.waste_pd_month || 0), 0);
-  const alertTeams = (eng.subteams || []).filter(t => t.status === "alert");
+  const eng = RADAR_DATA.engineering || {};
+  const subteams = eng.subteams || [];
+  const sinks = eng.time_sinks || [];
+  const totalWaste = sinks.reduce((acc, s) => acc + (s.waste_pd_month || 0), 0);
+  const alertTeams = subteams.filter(t => t.status === "alert");
   const reworkList = eng.rework_files || [];
 
   document.getElementById("delivery-strip").innerHTML =
     '<div class="bento-cell level-warn">' +
     '<div class="bento-head"><span class="bento-title"><span class="dot-badge" aria-hidden="true"></span>本月额外耗时</span><span class="pill warn">待优化</span></div>' +
     '<div class="bento-metric-row"><span class="bento-num">' + totalWaste.toFixed(1) + ' 人天</span><span class="bento-metric-label">编译排队 + 手工回归 + 答疑</span></div>' +
-    '<p class="bento-summary">把等待和重复答疑省下来，相当于多出近两人月研发时间</p></div>' +
+    '<p class="bento-summary">把等待和重复答疑省下来，相当于节省近 ' + Math.max(0.1, totalWaste / 21).toFixed(1) + ' 个人月</p></div>' +
 
     '<div class="bento-cell level-danger">' +
     '<div class="bento-head"><span class="bento-title"><span class="dot-badge" aria-hidden="true"></span>明显下滑小组</span><span class="pill signal">重点关注</span></div>' +
-    '<div class="bento-metric-row"><span class="bento-num" style="color:var(--ui-signal);">' + alertTeams.length + ' 个</span><span class="bento-metric-label">按期率跌破 85% 且环比跌超 15%</span></div>' +
+    '<div class="bento-metric-row"><span class="bento-num" style="color:var(--ui-signal);">' + alertTeams.length + ' 个</span><span class="bento-metric-label">按期率跌破 ' + TH.on_time_min + '% 且环比跌超 ' + Math.abs(TH.on_time_mom_drop) + '%</span></div>' +
     '<p class="bento-summary">' + esc(alertTeams.map(t => t.name + "（" + t.on_time_rate + "%）").join("、") || "暂无明显下滑小组") + '</p></div>' +
 
     '<div class="bento-cell level-ok">' +
-    '<div class="bento-head"><span class="bento-title"><span class="dot-badge" aria-hidden="true"></span>7 天反复修改文件</span><span class="pill ok">发版热修</span></div>' +
-    '<div class="bento-metric-row"><span class="bento-num">' + reworkList.length + ' 个</span><span class="bento-metric-label">修改 3 次及以上的核心文件</span></div>' +
-    '<p class="bento-summary">集中在端侧多媒体内存、流式渲染与多目标识别</p></div>';
+    '<div class="bento-head"><span class="bento-title"><span class="dot-badge" aria-hidden="true"></span>近期反复修改文件</span><span class="pill ok">发版热修</span></div>' +
+    '<div class="bento-metric-row"><span class="bento-num">' + reworkList.length + ' 个</span><span class="bento-metric-label">高频变动的核心代码或配置</span></div>' +
+    '<p class="bento-summary">' + esc(reworkList.slice(0, 2).map(r => r.module || r.file).join("、") || "暂无高频返工记录") + '</p></div>';
 
-  document.getElementById("subteams-table").innerHTML =
-    '<thead><tr><th>业务小组</th><th>近 6 周趋势</th><th class="num">按期上线率</th><th class="num">比上月</th><th class="num">提测打回</th><th>当前状态</th><th>主要原因</th></tr></thead><tbody>' +
-    eng.subteams.map(t => {
-      const stPill = t.status === "alert" ? '<span class="pill signal">明显下滑</span>' : (t.status === "watch" ? '<span class="pill warn">需留意</span>' : '<span class="pill ok">稳定</span>');
-      const deltaStr = (t.mom_delta >= 0 ? "+" : "") + t.mom_delta + "%";
-      return '<tr><td><strong>' + esc(t.name) + '</strong></td><td>' + renderSparkBars(t.trend, t.status) + '</td><td class="num">' + t.on_time_rate + '%</td><td class="num">' + deltaStr + '</td><td class="num">' + t.reopen_count + ' 次</td><td>' + stPill + '</td><td>' + esc(t.note) + '</td></tr>';
-    }).join("") + '</tbody>';
+  document.getElementById("subteams-table").innerHTML = subteams.length
+    ? '<thead><tr><th>业务小组</th><th>近 6 周趋势</th><th class="num">按期上线率</th><th class="num">比上月</th><th class="num">提测打回</th><th>当前状态</th><th>主要原因</th></tr></thead><tbody>' +
+      subteams.map(t => {
+        const stPill = t.status === "alert" ? '<span class="pill signal">明显下滑</span>' : (t.status === "watch" ? '<span class="pill warn">需留意</span>' : '<span class="pill ok">稳定</span>');
+        const deltaStr = (t.mom_delta >= 0 ? "+" : "") + t.mom_delta + "%";
+        return '<tr><td><strong>' + esc(t.name) + '</strong></td><td>' + renderSparkBars(t.trend, t.status) + '</td><td class="num">' + t.on_time_rate + '%</td><td class="num">' + deltaStr + '</td><td class="num">' + t.reopen_count + ' 次</td><td>' + stPill + '</td><td>' + esc(t.note) + '</td></tr>';
+      }).join("") + '</tbody>'
+    : '<tbody><tr><td>' + emptyStateHtml("暂未导入各小组按期率数据。") + '</td></tr></tbody>';
 
-  document.getElementById("rework-table").innerHTML =
-    '<thead><tr><th style="width:44%;">文件名</th><th class="num">7 天修改</th><th>返工原因</th></tr></thead><tbody>' +
-    reworkList.map(r =>
-      '<tr><td><span class="code-chip">' + fmtPathBreaks(r.file) + '</span></td><td class="num"><strong>' + r.rework_7d + ' 次</strong></td><td>' + esc(r.reason) + '</td></tr>'
-    ).join("") + '</tbody>';
+  document.getElementById("rework-table").innerHTML = reworkList.length
+    ? '<thead><tr><th style="width:44%;">文件名</th><th class="num">7 天修改</th><th>返工原因</th></tr></thead><tbody>' +
+      reworkList.map(r =>
+        '<tr><td><span class="code-chip">' + fmtPathBreaks(r.file) + '</span></td><td class="num"><strong>' + r.rework_7d + ' 次</strong></td><td>' + esc(r.reason) + '</td></tr>'
+      ).join("") + '</tbody>'
+    : '<tbody><tr><td>' + emptyStateHtml("暂未采集到高频修改文件（可运行 adapters/git_rework.py 自动统计）。") + '</td></tr></tbody>';
 
-  const maxPd = Math.max(1, ...eng.time_sinks.map(s => s.waste_pd_month));
-  document.getElementById("sinks-list").innerHTML = eng.time_sinks.map(s => {
-    const pct = Math.round((s.waste_pd_month / maxPd) * 100);
-    return '<div><div class="sink-row-top"><span class="sink-row-name">' + esc(s.item) + '</span><span class="sink-row-pd">' + s.waste_pd_month.toFixed(1) + ' 人天/月</span></div>' +
-      '<div class="bar-track"><div class="bar-fill bad" style="width:' + pct + '%"></div></div>' +
-      '<div class="sink-row-detail">' + esc(s.detail) + '</div></div>';
-  }).join("");
+  if (!sinks.length) {
+    document.getElementById("sinks-list").innerHTML = emptyStateHtml("暂未统计团队额外耗时事项。");
+  } else {
+    const maxPd = Math.max(1, ...sinks.map(s => s.waste_pd_month || 0));
+    document.getElementById("sinks-list").innerHTML = sinks.map(s => {
+      const pct = Math.round(((s.waste_pd_month || 0) / maxPd) * 100);
+      return '<div><div class="sink-row-top"><span class="sink-row-name">' + esc(s.item) + '</span><span class="sink-row-pd">' + Number(s.waste_pd_month || 0).toFixed(1) + ' 人天/月</span></div>' +
+        '<div class="bar-track"><div class="bar-fill bad" style="width:' + pct + '%"></div></div>' +
+        '<div class="sink-row-detail">' + esc(s.detail || "") + '</div></div>';
+    }).join("");
+  }
 }
 
 /* ---------- 右侧 AI 排查抽屉 ---------- */
@@ -2904,7 +3105,12 @@ function renderDelivery() {
 function renderDrawer() {
   const findings = RADAR_DATA.findings || [];
   const f = findings.find(x => x.id === state.drawerFindingId) || findings[0];
-  if (!f) return;
+  if (!f) {
+    document.getElementById("drawer-switcher").innerHTML = "";
+    document.getElementById("drawer-body").innerHTML = emptyStateHtml("当前快照暂无提炼异常；接入完整页面、变动或返工数据后可在此查看 AI 排查上下文包。");
+    document.getElementById("drawer-cli-hint").textContent = "终端导包：python3 radar/scripts/build_radar.py --input <快照JSON> --list-findings";
+    return;
+  }
 
   const chipNames = {
     "f_page_capture_tech": "P0 崩溃卡顿",
@@ -3009,11 +3215,11 @@ function setMode(mode) {
 }
 
 (function init() {
-  document.getElementById("app-title").textContent = RADAR_DATA.product_name + " · 团队雷达";
-  document.getElementById("app-window").textContent = RADAR_DATA.window;
+  document.getElementById("app-title").textContent = (RADAR_DATA.product_name || "团队") + " · 团队雷达";
+  document.getElementById("app-window").textContent = RADAR_DATA.window || "当前窗口";
   const meta = RADAR_DATA.meta || {};
-  document.getElementById("foot-note").textContent = meta.demo_note || "示例数据（Demo）";
-  document.getElementById("foot-updated").textContent = "更新日期：" + RADAR_DATA.updated;
+  document.getElementById("foot-note").textContent = meta.demo_note || meta.source_note || "Team Radar 离线看板";
+  document.getElementById("foot-updated").textContent = "更新日期：" + (RADAR_DATA.updated || "未记录");
 
   updateThemeButton();
   document.getElementById("theme-toggle").addEventListener("click", () => {
@@ -3119,6 +3325,7 @@ def main() -> int:
     ctx_bundle = _load_context_bundle(ctx_dir)
 
     data = json.loads(in_path.read_text(encoding="utf-8"))
+    data["thresholds"] = {**DEFAULT_THRESHOLDS, **(data.get("thresholds") or {})}
     data["findings"] = derive_findings(data, ctx_bundle)
 
     if args.list_findings:
@@ -3149,10 +3356,11 @@ def main() -> int:
     tokens_path.parent.mkdir(parents=True, exist_ok=True)
     tokens_path.write_text(json.dumps(DESIGN_TOKENS, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
+    flow = data.get("flow") or {}
     print(f"已生成 Team Radar 原型: {out_path.resolve()}")
     print(f"已导出实际 tokens: {tokens_path.resolve()}")
     print(f"  - 提炼重点问题: {len(data['findings'])} 条（P0/P1/P2）")
-    print(f"  - 链路节点: {len(data['flow']['nodes'])} 个，连线: {len(data['flow']['edges'])} 条")
+    print(f"  - 链路节点: {len(flow.get('nodes') or [])} 个，连线: {len(flow.get('edges') or [])} 条")
     return 0
 
 

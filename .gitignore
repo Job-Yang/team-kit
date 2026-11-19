@@ -1,4 +1,4 @@
-# 团队真实数据与本地产物默认忽略，防止误推到个人 GitHub 公网仓库
+# 团队真实数据、本地产物与公司内网专属适配器默认忽略，防止误推到公网 GitHub
 data/
 dist/
 local-data/
@@ -6,6 +6,7 @@ context/data/
 context/dist/
 radar/data/
 radar/dist/
+adapters/local/
 *.local.*
 .env
 .env.*
