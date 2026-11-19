@@ -1,6 +1,11 @@
 # 团队真实数据与本地产物默认忽略，防止误推到个人 GitHub 公网仓库
 data/
 dist/
+local-data/
+context/data/
+context/dist/
+radar/data/
+radar/dist/
 *.local.*
 .env
 .env.*

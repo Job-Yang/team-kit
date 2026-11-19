@@ -1,0 +1,394 @@
+{
+  "meta": {
+    "schema_version": "1.0",
+    "source_adapter": "snapshot",
+    "demo_note": "示例数据（Demo）· 展示页面转化、元素透视、上线变动与研发效率，实际使用时替换为团队导表或脚本拉取的数据"
+  },
+  "product_name": "示例 App（Demo）",
+  "window": "v2.4 灰度 5% 对比 v2.3 · 近 7 天（Demo 数据）",
+  "updated": "2026-11-19",
+  "status_lights": [
+    {
+      "id": "stability",
+      "label": "灰度阻断提醒",
+      "level": "danger",
+      "metric": "0.48%",
+      "metric_label": "拍照页灰度崩溃率",
+      "summary": "低端机大图解码内存溢出达 1.12%，建议先暂停扩量",
+      "focus_tab": "flow",
+      "focus_node": "page_capture",
+      "focus_mode": "tech"
+    },
+    {
+      "id": "funnel",
+      "label": "确认页退回重来",
+      "level": "warn",
+      "metric": "38.4%",
+      "metric_label": "中途退回比例",
+      "summary": "强弹窗打断连续提交，近四成用户未提交就退回",
+      "focus_tab": "flow",
+      "focus_node": "page_confirm",
+      "focus_mode": "frustration"
+    },
+    {
+      "id": "ai_quality",
+      "label": "AI 识别手动改错",
+      "level": "warn",
+      "metric": "18.6%",
+      "metric_label": "识别后手改比例",
+      "summary": "多目标同框时字段易配错，手改率较上周翻倍",
+      "focus_tab": "flow",
+      "focus_node": "page_parse",
+      "focus_mode": "frustration"
+    },
+    {
+      "id": "delivery",
+      "label": "本月额外耗时",
+      "level": "warn",
+      "metric": "38.5 人天",
+      "metric_label": "等待与重复答疑",
+      "summary": "编译排队、手工回归与重复答疑月耗近两人月",
+      "focus_tab": "delivery",
+      "focus_node": "page_capture",
+      "focus_mode": "all"
+    }
+  ],
+  "flow": {
+    "nodes": [
+      {
+        "id": "entry_home",
+        "title": "首页推荐入口",
+        "stage": "流量入口",
+        "owner": "首页业务组",
+        "related_files": ["Sources/Home/HomeRecommendCard.swift", "Sources/Home/TopNoticeBar.swift", "Sources/Records/RecordListVC.swift"],
+        "log_hints": "核对首页推荐卡曝光与点击埋点 home_recommend_entry_click",
+        "col": 0,
+        "row": 0,
+        "biz": { "uv": 182400, "pv": 265000, "conv_rate": 16.2, "conv_delta": 0.4, "stay_sec": 3.2 },
+        "tech": { "p90_ms": 210, "crash_rate": 0.02, "drop3_rate": 1.1, "api_err_rate": 0.05, "fallback_rate": 0.1 },
+        "frustration": { "rage_click_rate": 1.2, "backtrack_rate": 2.0, "ai_correct_rate": 0.0, "stream_abort_rate": 0.0 },
+        "slices": {
+          "新老版本": [
+            {"label": "v2.4 灰度(5%)", "biz": 16.0, "tech_ms": 215, "crash": 0.02},
+            {"label": "v2.3 基线", "biz": 16.2, "tech_ms": 209, "crash": 0.02}
+          ],
+          "高中低机型": [
+            {"label": "中高端机型", "biz": 17.5, "tech_ms": 170, "crash": 0.01},
+            {"label": "低端内存机", "biz": 13.8, "tech_ms": 295, "crash": 0.04}
+          ],
+          "新老用户": [
+            {"label": "首次使用新客", "biz": 11.2, "tech_ms": 220, "crash": 0.02},
+            {"label": "老用户", "biz": 18.4, "tech_ms": 205, "crash": 0.02}
+          ]
+        },
+        "elements": [
+          {"id": "el_home_notice", "name": "顶部待办提醒条", "kind": "header", "exposure": 164200, "ctr": 22.4, "ctr_delta": 1.1, "p90_ms": 165, "err_rate": 0.01, "issue_rate": 0.8, "status": "ok", "event": "home_notice_banner_click", "code_file": "Sources/Home/TopNoticeBar.swift", "note": "老用户复访高频区域，点击稳定"},
+          {"id": "el_home_card", "name": "首页推荐功能卡片", "kind": "hero", "exposure": 182400, "ctr": 16.2, "ctr_delta": 0.4, "p90_ms": 180, "err_rate": 0.02, "issue_rate": 1.2, "status": "ok", "event": "home_recommend_card_click", "code_file": "Sources/Home/HomeRecommendCard.swift", "note": "首页首屏核心入口，整体点击率平稳"},
+          {"id": "el_home_cta", "name": "立即体验主按钮", "kind": "action", "exposure": 182400, "ctr": 12.8, "ctr_delta": 0.6, "p90_ms": 210, "err_rate": 0.02, "issue_rate": 1.5, "status": "ok", "event": "home_primary_cta_click", "code_file": "Sources/Home/HomeRecommendCard.swift", "note": "直达拍照采集页的主按钮，耗时与稳定性健康"},
+          {"id": "el_home_records", "name": "我的记录入口", "kind": "tabbar", "exposure": 182400, "ctr": 3.4, "ctr_delta": -0.2, "p90_ms": 195, "err_rate": 0.01, "issue_rate": 2.0, "status": "ok", "event": "home_records_enter", "code_file": "Sources/Records/RecordListVC.swift", "note": "次级管理入口，属于正常长尾浏览"}
+        ]
+      },
+      {
+        "id": "entry_assist",
+        "title": "智能助手导流",
+        "stage": "流量入口",
+        "owner": "AI 交互组",
+        "related_files": ["Sources/AI/StreamRenderCell.swift", "Sources/AI/ActionSuggestCard.swift", "Sources/AI/AssistInputBar.swift"],
+        "log_hints": "核对流式推荐卡渲染耗时与 assist_card_jump 事件",
+        "col": 0,
+        "row": 1,
+        "biz": { "uv": 94600, "pv": 138000, "conv_rate": 24.8, "conv_delta": 2.1, "stay_sec": 4.8 },
+        "tech": { "p90_ms": 340, "crash_rate": 0.03, "drop3_rate": 2.4, "api_err_rate": 0.11, "fallback_rate": 0.3 },
+        "frustration": { "rage_click_rate": 2.1, "backtrack_rate": 3.5, "ai_correct_rate": 4.2, "stream_abort_rate": 6.4 },
+        "slices": {
+          "新老版本": [
+            {"label": "v2.4 灰度(5%)", "biz": 25.1, "tech_ms": 345, "crash": 0.03},
+            {"label": "v2.3 基线", "biz": 24.7, "tech_ms": 339, "crash": 0.03}
+          ],
+          "高中低机型": [
+            {"label": "中高端机型", "biz": 26.2, "tech_ms": 290, "crash": 0.02},
+            {"label": "低端内存机", "biz": 21.4, "tech_ms": 430, "crash": 0.05}
+          ],
+          "新老用户": [
+            {"label": "首次使用新客", "biz": 22.0, "tech_ms": 350, "crash": 0.03},
+            {"label": "老用户", "biz": 26.3, "tech_ms": 330, "crash": 0.03}
+          ]
+        },
+        "elements": [
+          {"id": "el_ast_stream", "name": "流式回复内容区", "kind": "hero", "exposure": 94600, "ctr": 64.2, "ctr_delta": 1.8, "p90_ms": 340, "err_rate": 0.11, "issue_rate": 6.4, "status": "ok", "event": "assist_stream_render_done", "code_file": "Sources/AI/StreamRenderCell.swift", "note": "长回复偶有列表高度抖动，整体完读率稳定"},
+          {"id": "el_ast_card", "name": "文末快捷引导卡片", "kind": "card", "exposure": 88400, "ctr": 24.8, "ctr_delta": 2.1, "p90_ms": 260, "err_rate": 0.03, "issue_rate": 2.1, "status": "ok", "event": "assist_card_jump_click", "code_file": "Sources/AI/ActionSuggestCard.swift", "note": "本周导流表现最佳的卡片，点击率较基线涨 2.1%"},
+          {"id": "el_ast_regen", "name": "重新生成回复按钮", "kind": "action", "exposure": 94600, "ctr": 4.2, "ctr_delta": -0.3, "p90_ms": 380, "err_rate": 0.08, "issue_rate": 4.2, "status": "ok", "event": "assist_reply_regen_click", "code_file": "Sources/AI/ActionSuggestCard.swift", "note": "重问比例在正常区间内"},
+          {"id": "el_ast_voice", "name": "底部语音输入栏", "kind": "tabbar", "exposure": 94600, "ctr": 9.6, "ctr_delta": 0.5, "p90_ms": 220, "err_rate": 0.02, "issue_rate": 1.4, "status": "ok", "event": "assist_voice_input_tap", "code_file": "Sources/AI/AssistInputBar.swift", "note": "响应较快，暂无明显阻塞"}
+        ]
+      },
+      {
+        "id": "entry_quick",
+        "title": "底部快捷入口",
+        "stage": "流量入口",
+        "owner": "主框架导航组",
+        "related_files": ["Sources/Tab/MainTabBarController.swift"],
+        "log_hints": "核对底部快捷按钮预热状态 tab_quick_entry_open",
+        "col": 0,
+        "row": 2,
+        "biz": { "uv": 61200, "pv": 89000, "conv_rate": 41.5, "conv_delta": -0.6, "stay_sec": 2.1 },
+        "tech": { "p90_ms": 185, "crash_rate": 0.01, "drop3_rate": 0.9, "api_err_rate": 0.03, "fallback_rate": 0.0 },
+        "frustration": { "rage_click_rate": 0.8, "backtrack_rate": 1.5, "ai_correct_rate": 0.0, "stream_abort_rate": 0.0 },
+        "slices": {
+          "新老版本": [
+            {"label": "v2.4 灰度(5%)", "biz": 41.1, "tech_ms": 190, "crash": 0.01},
+            {"label": "v2.3 基线", "biz": 41.6, "tech_ms": 184, "crash": 0.01}
+          ],
+          "高中低机型": [
+            {"label": "中高端机型", "biz": 43.2, "tech_ms": 160, "crash": 0.01},
+            {"label": "低端内存机", "biz": 37.9, "tech_ms": 240, "crash": 0.02}
+          ],
+          "新老用户": [
+            {"label": "首次使用新客", "biz": 36.4, "tech_ms": 195, "crash": 0.01},
+            {"label": "老用户", "biz": 44.1, "tech_ms": 180, "crash": 0.01}
+          ]
+        },
+        "elements": [
+          {"id": "el_qk_tip", "name": "新客气泡引导", "kind": "header", "exposure": 21800, "ctr": 36.4, "ctr_delta": 0.2, "p90_ms": 150, "err_rate": 0.01, "issue_rate": 1.5, "status": "ok", "event": "tab_quick_tooltip_tap", "code_file": "Sources/Tab/MainTabBarController.swift", "note": "新客引导效果良好"},
+          {"id": "el_qk_mode", "name": "快捷模式切换键", "kind": "card", "exposure": 61200, "ctr": 14.2, "ctr_delta": -0.4, "p90_ms": 160, "err_rate": 0.01, "issue_rate": 1.1, "status": "ok", "event": "quick_mode_switch", "code_file": "Sources/Tab/MainTabBarController.swift", "note": "辅助模式切换稳定"},
+          {"id": "el_qk_go", "name": "拉起采集页动作", "kind": "action", "exposure": 61200, "ctr": 41.5, "ctr_delta": -0.6, "p90_ms": 185, "err_rate": 0.01, "issue_rate": 0.9, "status": "ok", "event": "quick_capture_warmup", "code_file": "Sources/Tab/MainTabBarController.swift", "note": "入口无瓶颈，流失主要发生在进入采集页之后"},
+          {"id": "el_qk_tab", "name": "底栏中心快捷图标", "kind": "tabbar", "exposure": 61200, "ctr": 41.5, "ctr_delta": -0.6, "p90_ms": 185, "err_rate": 0.01, "issue_rate": 0.8, "status": "ok", "event": "tab_quick_entry_open", "code_file": "Sources/Tab/MainTabBarController.swift", "note": "直达入口启动耗时正常"}
+        ]
+      },
+      {
+        "id": "page_capture",
+        "title": "拍照采集页",
+        "stage": "采集预处理",
+        "owner": "端侧多媒体组",
+        "related_files": ["Sources/Capture/MediaBurstProcessor.swift", "Config/Remote/upload_resolution.json"],
+        "log_hints": "按 app_version=2.4 与 device_ram<=4G 过滤崩溃堆栈，对比大图解码前后内存水位",
+        "col": 1,
+        "row": 1,
+        "biz": { "uv": 78400, "pv": 146500, "conv_rate": 72.4, "conv_delta": -6.8, "stay_sec": 11.4 },
+        "tech": { "p90_ms": 1480, "crash_rate": 0.48, "drop3_rate": 9.6, "api_err_rate": 1.2, "fallback_rate": 2.8 },
+        "frustration": { "rage_click_rate": 9.4, "backtrack_rate": 14.2, "ai_correct_rate": 0.0, "stream_abort_rate": 0.0 },
+        "slices": {
+          "新老版本": [
+            {"label": "v2.4 灰度(5%)", "biz": 56.1, "tech_ms": 2340, "crash": 0.48},
+            {"label": "v2.3 基线", "biz": 74.2, "tech_ms": 980, "crash": 0.06}
+          ],
+          "高中低机型": [
+            {"label": "中高端机型", "biz": 75.8, "tech_ms": 820, "crash": 0.09},
+            {"label": "低端内存机", "biz": 50.6, "tech_ms": 2890, "crash": 1.12}
+          ],
+          "新老用户": [
+            {"label": "首次使用新客", "biz": 66.2, "tech_ms": 1520, "crash": 0.45},
+            {"label": "老用户", "biz": 75.1, "tech_ms": 1450, "crash": 0.49}
+          ]
+        },
+        "elements": [
+          {"id": "el_cap_cfg", "name": "原图上传配置开关", "kind": "header", "exposure": 78400, "ctr": 98.2, "ctr_delta": 0.0, "p90_ms": 620, "err_rate": 0.48, "issue_rate": 14.2, "status": "warn", "event": "capture_res_config_apply", "code_file": "Config/Remote/upload_resolution.json", "note": "11-16 远程配置从 1080p 改成原图直传，显著拉高解码耗时和内存"},
+          {"id": "el_cap_preview", "name": "取景与连拍解码区", "kind": "hero", "exposure": 78400, "ctr": 72.4, "ctr_delta": -6.8, "p90_ms": 1480, "err_rate": 0.48, "issue_rate": 9.6, "status": "danger", "event": "capture_frame_decode", "code_file": "Sources/Capture/MediaBurstProcessor.swift", "note": "低端机解码原图发生内存溢出，崩溃率达 1.12%，P90 耗时高达 2890ms"},
+          {"id": "el_cap_shutter", "name": "连拍快门主按钮", "kind": "action", "exposure": 78400, "ctr": 72.4, "ctr_delta": -6.8, "p90_ms": 890, "err_rate": 1.20, "issue_rate": 9.4, "status": "warn", "event": "capture_burst_shutter_tap", "code_file": "Sources/Capture/MediaBurstProcessor.swift", "note": "画面卡顿时用户反复连点快门达 9.4%，v2.4 灰度通过率跌至 56.1%"},
+          {"id": "el_cap_album", "name": "从相册选图入口", "kind": "tabbar", "exposure": 78400, "ctr": 8.3, "ctr_delta": 1.9, "p90_ms": 310, "err_rate": 0.04, "issue_rate": 2.1, "status": "ok", "event": "capture_album_pick", "code_file": "Sources/Capture/MediaBurstProcessor.swift", "note": "部分用户因为现场取景卡顿改走相册导入"}
+        ]
+      },
+      {
+        "id": "page_parse",
+        "title": "智能识别页",
+        "stage": "AI 解析",
+        "owner": "算法与流式交互组",
+        "related_files": ["Prompts/multimodal_parse_v14.yaml", "Sources/AI/StreamRenderCell.swift", "Sources/Submit/ConfirmSheetVC.swift"],
+        "log_hints": "抽取 parse_manual_edit 手改样本，按 target_count>=2 分组对比 Prompt v13 与 v14 准确率",
+        "col": 2,
+        "row": 1,
+        "biz": { "uv": 56760, "pv": 108200, "conv_rate": 68.5, "conv_delta": -2.4, "stay_sec": 14.6 },
+        "tech": { "p90_ms": 2650, "crash_rate": 0.05, "drop3_rate": 4.2, "api_err_rate": 0.4, "fallback_rate": 1.9 },
+        "frustration": { "rage_click_rate": 4.1, "backtrack_rate": 11.8, "ai_correct_rate": 18.6, "stream_abort_rate": 16.2 },
+        "slices": {
+          "新老版本": [
+            {"label": "v2.4 灰度(5%)", "biz": 64.9, "tech_ms": 2820, "crash": 0.05},
+            {"label": "v2.3 基线", "biz": 68.8, "tech_ms": 2610, "crash": 0.05}
+          ],
+          "高中低机型": [
+            {"label": "中高端机型", "biz": 71.2, "tech_ms": 2410, "crash": 0.04},
+            {"label": "低端内存机", "biz": 63.1, "tech_ms": 3120, "crash": 0.07}
+          ],
+          "新老用户": [
+            {"label": "首次使用新客", "biz": 61.5, "tech_ms": 2680, "crash": 0.05},
+            {"label": "老用户", "biz": 71.8, "tech_ms": 2620, "crash": 0.05}
+          ]
+        },
+        "elements": [
+          {"id": "el_parse_result", "name": "多目标框选识别区", "kind": "hero", "exposure": 56760, "ctr": 81.4, "ctr_delta": -2.4, "p90_ms": 2650, "err_rate": 0.05, "issue_rate": 18.6, "status": "danger", "event": "ai_multitarget_parse_render", "code_file": "Prompts/multimodal_parse_v14.yaml", "note": "11-17 上线 Prompt v14 后，多目标同框易把名称与属性配错，手改率升至 18.6%"},
+          {"id": "el_parse_stream", "name": "流式说明解析卡片", "kind": "card", "exposure": 56760, "ctr": 44.2, "ctr_delta": -4.1, "p90_ms": 2650, "err_rate": 0.40, "issue_rate": 16.2, "status": "warn", "event": "ai_stream_panel_view", "code_file": "Sources/AI/StreamRenderCell.swift", "note": "首包慢加上长列表重排抖动，16.2% 的用户等不及直接半路关闭"},
+          {"id": "el_parse_edit", "name": "手动修改结果按钮", "kind": "action", "exposure": 56760, "ctr": 18.6, "ctr_delta": 9.5, "p90_ms": 190, "err_rate": 0.02, "issue_rate": 18.6, "status": "danger", "event": "parse_manual_edit", "code_file": "Prompts/multimodal_parse_v14.yaml", "note": "手改点击率较上周（9.1%）翻倍，接口零报错但识别准确率倒退"},
+          {"id": "el_parse_next", "name": "下一步确认按钮", "kind": "tabbar", "exposure": 56760, "ctr": 68.5, "ctr_delta": -2.4, "p90_ms": 240, "err_rate": 0.05, "issue_rate": 11.8, "status": "ok", "event": "parse_go_confirm_click", "code_file": "Sources/Submit/ConfirmSheetVC.swift", "note": "识别完成流向确认页的主出口"}
+        ]
+      },
+      {
+        "id": "page_confirm",
+        "title": "信息确认页",
+        "stage": "中间确认",
+        "owner": "核心业务前端组",
+        "related_files": ["BFF/Submit/BatchSubmitHandler.ts", "Sources/Submit/ConfirmSheetVC.swift"],
+        "log_hints": "排查批量提交会话下的 confirm_sheet_backtrack 与强弹窗实验暴露比例",
+        "col": 3,
+        "row": 0,
+        "biz": { "uv": 38880, "pv": 64900, "conv_rate": 53.2, "conv_delta": -11.5, "stay_sec": 26.8 },
+        "tech": { "p90_ms": 390, "crash_rate": 0.02, "drop3_rate": 1.6, "api_err_rate": 0.08, "fallback_rate": 0.0 },
+        "frustration": { "rage_click_rate": 8.7, "backtrack_rate": 38.4, "ai_correct_rate": 6.5, "stream_abort_rate": 0.0 },
+        "slices": {
+          "新老版本": [
+            {"label": "v2.4 灰度(5%)", "biz": 52.8, "tech_ms": 395, "crash": 0.02},
+            {"label": "v2.3 基线", "biz": 53.4, "tech_ms": 388, "crash": 0.02}
+          ],
+          "高中低机型": [
+            {"label": "中高端机型", "biz": 54.6, "tech_ms": 320, "crash": 0.01},
+            {"label": "低端内存机", "biz": 50.1, "tech_ms": 480, "crash": 0.03}
+          ],
+          "新老用户": [
+            {"label": "首次使用新客", "biz": 46.2, "tech_ms": 400, "crash": 0.02},
+            {"label": "老用户（连续提交）", "biz": 55.9, "tech_ms": 385, "crash": 0.02}
+          ]
+        },
+        "elements": [
+          {"id": "el_conf_back", "name": "左上角返回重拍键", "kind": "header", "exposure": 38880, "ctr": 38.4, "ctr_delta": 14.2, "p90_ms": 120, "err_rate": 0.01, "issue_rate": 38.4, "status": "danger", "event": "confirm_sheet_backtrack", "code_file": "Sources/Submit/ConfirmSheetVC.swift", "note": "近四成用户未提交就退回，连续采集场景被打断最多"},
+          {"id": "el_conf_form", "name": "识别字段确认卡片", "kind": "card", "exposure": 38880, "ctr": 64.0, "ctr_delta": -1.5, "p90_ms": 280, "err_rate": 0.05, "issue_rate": 6.5, "status": "ok", "event": "confirm_field_edit", "code_file": "BFF/Submit/BatchSubmitHandler.ts", "note": "基础表单与校验接口都很稳定"},
+          {"id": "el_conf_modal", "name": "强弹窗：必填补充信息", "kind": "modal", "exposure": 21800, "ctr": 31.2, "ctr_delta": -18.5, "p90_ms": 390, "err_rate": 0.02, "issue_rate": 38.4, "status": "danger", "event": "ab_force_extra_modal_show", "code_file": "Sources/Submit/ConfirmSheetVC.swift", "note": "11-18 扩量到 30% 的 AB 实验：强制打断连续操作节奏，停留时长拉长到 26.8s"},
+          {"id": "el_conf_submit", "name": "确认提交主按钮", "kind": "action", "exposure": 38880, "ctr": 53.2, "ctr_delta": -11.5, "p90_ms": 390, "err_rate": 0.08, "issue_rate": 8.7, "status": "warn", "event": "confirm_submit_click", "code_file": "BFF/Submit/BatchSubmitHandler.ts", "note": "受强弹窗与逐条确认拖累，本页转化较基线跌 11.5%"}
+        ]
+      },
+      {
+        "id": "page_done",
+        "title": "提交完成页",
+        "stage": "闭环完成",
+        "owner": "核心业务与消息组",
+        "related_files": ["Sources/Records/RecordListVC.swift", "BFF/Submit/BatchSubmitHandler.ts", "Sources/AI/ActionSuggestCard.swift"],
+        "log_hints": "核对批量提交耗时 batch_commit_ms 与后续动作点击率",
+        "col": 3,
+        "row": 2,
+        "biz": { "uv": 20680, "pv": 27400, "conv_rate": 79.4, "conv_delta": -1.2, "stay_sec": 18.2 },
+        "tech": { "p90_ms": 410, "crash_rate": 0.02, "drop3_rate": 1.8, "api_err_rate": 0.09, "fallback_rate": 0.0 },
+        "frustration": { "rage_click_rate": 2.4, "backtrack_rate": 4.2, "ai_correct_rate": 0.0, "stream_abort_rate": 0.0 },
+        "slices": {
+          "新老版本": [
+            {"label": "v2.4 灰度(5%)", "biz": 79.0, "tech_ms": 415, "crash": 0.02},
+            {"label": "v2.3 基线", "biz": 79.5, "tech_ms": 408, "crash": 0.02}
+          ],
+          "高中低机型": [
+            {"label": "中高端机型", "biz": 81.2, "tech_ms": 360, "crash": 0.01},
+            {"label": "低端内存机", "biz": 75.8, "tech_ms": 520, "crash": 0.03}
+          ],
+          "新老用户": [
+            {"label": "首次使用新客", "biz": 73.1, "tech_ms": 420, "crash": 0.02},
+            {"label": "老用户", "biz": 82.0, "tech_ms": 405, "crash": 0.02}
+          ]
+        },
+        "elements": [
+          {"id": "el_done_list", "name": "已保存记录列表", "kind": "hero", "exposure": 20680, "ctr": 79.4, "ctr_delta": -1.2, "p90_ms": 410, "err_rate": 0.02, "issue_rate": 4.2, "status": "ok", "event": "record_list_exposure", "code_file": "Sources/Records/RecordListVC.swift", "note": "提交完成后的列表浏览与复访比较健康"},
+          {"id": "el_done_remind", "name": "一键开启后续提醒", "kind": "card", "exposure": 20680, "ctr": 46.8, "ctr_delta": 2.3, "p90_ms": 290, "err_rate": 0.04, "issue_rate": 1.8, "status": "ok", "event": "done_remind_toggle", "code_file": "Sources/Records/RecordListVC.swift", "note": "用户完成后开启提醒的意愿较高"},
+          {"id": "el_done_more", "name": "继续采集下一条", "kind": "action", "exposure": 20680, "ctr": 32.6, "ctr_delta": -2.8, "p90_ms": 360, "err_rate": 0.03, "issue_rate": 3.1, "status": "ok", "event": "done_capture_more_click", "code_file": "BFF/Submit/BatchSubmitHandler.ts", "note": "如果前面支持批量连拍一次提交，可减少这里的重复折返"},
+          {"id": "el_done_assist", "name": "发起智能追问入口", "kind": "tabbar", "exposure": 20680, "ctr": 19.4, "ctr_delta": 3.5, "p90_ms": 410, "err_rate": 0.09, "issue_rate": 2.4, "status": "ok", "event": "done_assist_followup", "code_file": "Sources/AI/ActionSuggestCard.swift", "note": "提交完成后的高价值二次交互入口"}
+        ]
+      }
+    ],
+    "edges": [
+      {"from": "entry_home", "to": "page_capture", "uv_ctr": 16.2, "pv_ctr": 18.9, "uv_delta": 0.4, "pv_delta": 0.6, "dropoff_uv": 152850, "label": "首页点击"},
+      {"from": "entry_assist", "to": "page_capture", "uv_ctr": 24.8, "pv_ctr": 27.1, "uv_delta": 2.1, "pv_delta": 1.8, "dropoff_uv": 71140, "label": "助手导流"},
+      {"from": "entry_quick", "to": "page_capture", "uv_ctr": 41.5, "pv_ctr": 44.2, "uv_delta": -0.6, "pv_delta": -0.4, "dropoff_uv": 35800, "label": "底部直达"},
+      {"from": "page_capture", "to": "page_parse", "uv_ctr": 72.4, "pv_ctr": 73.8, "uv_delta": -6.8, "pv_delta": -5.9, "dropoff_uv": 21640, "label": "拍图上传"},
+      {"from": "page_parse", "to": "page_confirm", "uv_ctr": 68.5, "pv_ctr": 60.0, "uv_delta": -2.4, "pv_delta": -3.1, "dropoff_uv": 17880, "label": "输出识别结果"},
+      {"from": "page_confirm", "to": "page_done", "uv_ctr": 53.2, "pv_ctr": 42.2, "uv_delta": -11.5, "pv_delta": -13.4, "dropoff_uv": 18200, "label": "确认提交"}
+    ]
+  },
+  "timeline": {
+    "dates": ["11-13", "11-14", "11-15", "11-16", "11-17", "11-18", "11-19"],
+    "biz_conv": [66.8, 67.1, 66.5, 65.9, 61.2, 56.4, 53.2],
+    "tech_p90_ms": [980, 995, 1010, 1140, 1460, 1510, 1480],
+    "crash_rate": [0.06, 0.06, 0.07, 0.14, 0.36, 0.45, 0.48],
+    "changes": [
+      {
+        "date": "11-16",
+        "type": "远程配置",
+        "title": "端侧上传图片分辨率阈值 1080p -> 原图",
+        "owner": "端侧多媒体组",
+        "focus_node": "page_capture",
+        "focus_mode": "tech",
+        "impact": "低端机解码内存暴涨，拍照页耗时跳升且崩溃抬头"
+      },
+      {
+        "date": "11-17",
+        "type": "灰度发版",
+        "title": "v2.4 开启 5% 外部灰度（含连续拍照新流程）",
+        "owner": "客户端发布",
+        "focus_node": "page_capture",
+        "focus_mode": "tech",
+        "impact": "灰度包拍照页转化从 74.2% 跌至 56.1%，低端机崩溃率达 1.12%"
+      },
+      {
+        "date": "11-17",
+        "type": "Prompt 改动",
+        "title": "多目标识别 Prompt v14 上线",
+        "owner": "算法与流式交互组",
+        "focus_node": "page_parse",
+        "focus_mode": "frustration",
+        "impact": "多目标同拍时字段配对错位，用户手改率由 9.1% 升至 18.6%"
+      },
+      {
+        "date": "11-18",
+        "type": "AB 实验",
+        "title": "实验组：提交前强弹窗必填补充信息（扩量 30%）",
+        "owner": "核心业务产品",
+        "focus_node": "page_confirm",
+        "focus_mode": "frustration",
+        "impact": "连续提交场景用户被迫逐条停顿，退回重来率冲到 38.4%"
+      }
+    ]
+  },
+  "engineering": {
+    "subteams": [
+      {
+        "name": "端侧采集与体验组",
+        "on_time_rate": 68,
+        "mom_delta": -19,
+        "reopen_count": 4,
+        "status": "alert",
+        "trend": [88, 86, 87, 82, 74, 68],
+        "note": "按期率不到 85% 且比上月跌超 15%，主因灰度发现低端机内存溢出打回"
+      },
+      {
+        "name": "AI 交互与流式渲染组",
+        "on_time_rate": 84,
+        "mom_delta": -6,
+        "reopen_count": 2,
+        "status": "watch",
+        "trend": [91, 90, 89, 88, 86, 84],
+        "note": "多端卡片兼容老版本反复补丁"
+      },
+      {
+        "name": "基础组件与通用框架组",
+        "on_time_rate": 93,
+        "mom_delta": 3,
+        "reopen_count": 0,
+        "status": "ok",
+        "trend": [89, 90, 91, 90, 92, 93],
+        "note": "节奏稳定"
+      },
+      {
+        "name": "服务端接口与评测组",
+        "on_time_rate": 91,
+        "mom_delta": 1,
+        "reopen_count": 1,
+        "status": "ok",
+        "trend": [90, 90, 91, 90, 92, 91],
+        "note": "按期稳定"
+      }
+    ],
+    "rework_files": [
+      {"file": "Sources/Capture/MediaBurstProcessor.swift", "rework_7d": 5, "module": "端侧采集", "reason": "连续拍图内存未释放与压缩阈值反复回滚"},
+      {"file": "Sources/AI/StreamRenderCell.swift", "rework_7d": 4, "module": "流式交互", "reason": "长回复表格抖动与代码块截断热修"},
+      {"file": "BFF/Submit/BatchSubmitHandler.ts", "rework_7d": 3, "module": "中间层", "reason": "批量提交字段校验兼容老版本补丁"},
+      {"file": "Prompts/multimodal_parse_v14.yaml", "rework_7d": 3, "module": "智能识别", "reason": "多目标字段配对错位微调"}
+    ],
+    "time_sinks": [
+      {"item": "本地与云端集成编译排队", "waste_pd_month": 18.5, "detail": "日均每人等编译 38 分钟，主因预编译缓存命中率掉到 61%"},
+      {"item": "发版前手工多机型回归录屏", "waste_pd_month": 11.0, "detail": "每次周发版需要 3 名同学手工跑 20 条核心采集与提交流程用例"},
+      {"item": "群里高频重复答疑（灰度和埋点口径）", "waste_pd_month": 9.0, "detail": "近两周重复问“为什么某卡片不展示”“如何看灰度堆栈”共 46 次"}
+    ]
+  }
+}

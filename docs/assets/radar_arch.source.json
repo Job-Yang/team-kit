@@ -1,0 +1,260 @@
+{
+  "meta": {
+    "note": "数据源随团队条件渐进升级，始终输出同一份标准快照文件，与核心分析和前端展示解耦。",
+    "subtitle": "Team Radar 整体架构（隶属 team-kit）· 实线为主链路 / 虚线为可选联动或后续扩展",
+    "title": "三档渐进取数归一，驱动四视图雷达与 AI 排查交接"
+  },
+  "payload": {
+    "connections": [
+      {
+        "from": "tier1",
+        "id": "c1",
+        "label": "转为标准格式",
+        "to": "snapshot"
+      },
+      {
+        "from": "tier2",
+        "id": "c2",
+        "label": "定时刷新",
+        "to": "snapshot"
+      },
+      {
+        "from": "tier3",
+        "id": "c3",
+        "label": "增量写入",
+        "style": "dashed",
+        "to": "snapshot"
+      },
+      {
+        "emphasis": true,
+        "from": "snapshot",
+        "id": "c4",
+        "label": "读取汇总",
+        "to": "compiler"
+      },
+      {
+        "from": "ctx_hook",
+        "id": "c5",
+        "label": "补充背景",
+        "style": "dashed",
+        "to": "compiler"
+      },
+      {
+        "emphasis": true,
+        "from": "compiler",
+        "id": "c6",
+        "label": "编译单文件",
+        "to": "web_board"
+      },
+      {
+        "emphasis": true,
+        "from": "compiler",
+        "id": "c7",
+        "label": "生成排查包",
+        "to": "ai_handoff"
+      }
+    ],
+    "groups": [
+      {
+        "id": "tiers",
+        "label": "三档数据来源",
+        "layer": "ingest"
+      },
+      {
+        "id": "snap_grp",
+        "label": "统一快照输入",
+        "layer": "snap_layer"
+      },
+      {
+        "id": "engine",
+        "label": "分析编译区",
+        "layer": "core"
+      },
+      {
+        "id": "deliver",
+        "label": "人机消费出口",
+        "layer": "outputs"
+      }
+    ],
+    "kpi_badges": [
+      {
+        "label": "隶属 team-kit",
+        "tone": "blue"
+      },
+      {
+        "label": "零三方依赖",
+        "tone": "teal"
+      }
+    ],
+    "layers": [
+      {
+        "id": "ingest",
+        "label": "数据源与三档接入（按需选用）",
+        "tone": "sky"
+      },
+      {
+        "id": "snap_layer",
+        "label": "标准快照层（内网聚合数据，与平台解耦）",
+        "tone": "lavender"
+      },
+      {
+        "id": "core",
+        "label": "核心编译与可选联动（team-kit/radar）",
+        "tone": "sage"
+      },
+      {
+        "id": "outputs",
+        "label": "人机双出口（发现问题 + 交给 AI 排查）",
+        "tone": "sky"
+      }
+    ],
+    "layout": {
+      "width": 1380
+    },
+    "nodes": [
+      {
+        "badge": "1",
+        "chips": [
+          [
+            "第 1 天即用",
+            "filled",
+            "teal"
+          ],
+          "零权限门槛"
+        ],
+        "code": "CSV / Excel -> JSON",
+        "desc": "导近 7 天转化、崩溃与变更直接转换",
+        "group": "tiers",
+        "id": "tier1",
+        "label": "第一档：手工导表",
+        "layer": "ingest",
+        "role": "cloud"
+      },
+      {
+        "badge": "2",
+        "chips": [
+          "按天或按周",
+          "本地开发机"
+        ],
+        "code": "git log / 构建日志 / 导表",
+        "desc": "定时跑只读脚本汇总热点返工与指标",
+        "group": "tiers",
+        "id": "tier2",
+        "label": "第二档：本地拉数脚本",
+        "layer": "ingest",
+        "role": "backend"
+      },
+      {
+        "chips": [
+          [
+            "后续扩展",
+            "outline",
+            "amber"
+          ],
+          "内网授权"
+        ],
+        "code": "BI / APM / 发布单 / AB",
+        "dashed": true,
+        "desc": "接入内部只读接口，定时增量刷新",
+        "group": "tiers",
+        "id": "tier3",
+        "label": "第三档：内部平台与 MCP",
+        "layer": "ingest",
+        "role": "cloud"
+      },
+      {
+        "badge": "4",
+        "code": "snapshot.json",
+        "desc": "统一收纳状态灯、页面元素、改动与交付统计（仅存聚合指标与文件路径，留在公司内网）",
+        "group": "snap_grp",
+        "id": "snapshot",
+        "label": "标准快照文件",
+        "layer": "snap_layer",
+        "role": "database"
+      },
+      {
+        "badge": "5",
+        "chips": [
+          [
+            "零重写复用",
+            "filled",
+            "accent"
+          ],
+          "Python 标准库",
+          "支持 CLI 导出"
+        ],
+        "code": "radar/scripts/build_radar.py",
+        "desc": "交叉定位阻塞源头，生成离线看板与排查上下文包",
+        "emphasis": true,
+        "group": "engine",
+        "id": "compiler",
+        "label": "Radar 编译器",
+        "layer": "core",
+        "role": "backend"
+      },
+      {
+        "chips": [
+          [
+            "可选低耦合",
+            "outline",
+            "blue"
+          ],
+          "不传仍独立运行"
+        ],
+        "code": "--context-dir context/data",
+        "dashed": true,
+        "desc": "可选按负责人和文件名匹配 owners.md / code-graph.json / pitfalls.md",
+        "group": "engine",
+        "id": "ctx_hook",
+        "label": "Team Context 联动",
+        "layer": "core",
+        "role": "security"
+      },
+      {
+        "badge": "6",
+        "chips": [
+          "深色 / 暖骨白",
+          "浏览器直开"
+        ],
+        "code": "dist/radar.html",
+        "desc": "总览、页面转化（仿真手机元素透视）、上线变动、交付效率",
+        "group": "deliver",
+        "id": "web_board",
+        "label": "四视图交互看板",
+        "layer": "outputs",
+        "role": "frontend"
+      },
+      {
+        "badge": "7",
+        "chips": [
+          "抽屉一键复制",
+          "获批 AI IDE"
+        ],
+        "code": "Markdown 包 / --export-prompt",
+        "desc": "输出 P0-P2 判断、可疑文件入口与 3 步排查清单",
+        "group": "deliver",
+        "id": "ai_handoff",
+        "label": "AI 排查上下文包",
+        "layer": "outputs",
+        "role": "agent"
+      }
+    ],
+    "notes": [
+      {
+        "detail": "脚本与文档随个人 team-kit 公网仓带走；snapshot.json 与 HTML 产物通过 .gitignore 屏蔽并锁在公司内网。",
+        "id": "n1",
+        "label": "工具与数据物理隔离",
+        "tone": "teal"
+      },
+      {
+        "detail": "Radar 只负责发现问题并把精确线索交给用户选定的 AI 工具，不越界直接修改业务代码或线上配置。",
+        "id": "n2",
+        "label": "AI 辅助排查的边界",
+        "tone": "amber"
+      }
+    ],
+    "preset": "document-roles"
+  },
+  "type": "architecture-blueprint",
+  "version": 1
+}

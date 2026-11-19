@@ -55,16 +55,16 @@ Team Context 是一套 **轻量工具加纯文本数据底座**，它区别于�
 从仓库落地上看，前期没必要拆成好几个库增加心智负担，用**单仓库内按目录物理隔离**最轻便：外层是人人可带走的通用工具与文档，内层是锁在公司内网的真实团队数据。
 
 ```text
-team-context/                      # 单个工作区：外层工具可带走，data/ 仅留内网
-├── README.md                      # 极简操作手册：专门写给 AI 看，告诉它进仓后怎么查、怎么更新
-├── docs/                          # 给人看的设计文档与使用说明（如本方案，可迁往个人网站）
-├── scripts/                       # 通用工具脚本（不绑定任何公司，可放 GitHub）
+team-kit/                          # 单个工作区：外层工具可带走，data/ 仅留内网
+├── README.md                      # 仓库总览：说明 context/ 与 radar/ 两个独立模块
+├── docs/                          # 给人看的设计文档（team-context.md / team-radar.md）
+├── context/scripts/               # Team Context 通用脚本（不绑定任何公司，可放 GitHub）
 │   ├── scan_repo.py               # 自动分析代码架构、热改文件、回滚历史与目录活跃作者
 │   ├── absorb_docs.py             # 辅助批量拆解现有新人文档、周报与复盘为结构化草稿
 │   ├── build_portal.py            # 一条命令把 data/ 编译成可交互的 HTML 团队网站（附带导出 MD 文档）
 │   ├── sync_ai_rules.py           # 生成或同步 AGENTS.md / CLAUDE.md / IDE 规则文件
 │   └── check_safety.py            # 提交前检查密码/Token/隐私敏感词，以及死链与过期提醒
-├── adapters/                      # 可选：针对不同公司平台的轻量化读取脚本（Git/文档/看板/配置）
+├── radar/scripts/                 # Team Radar 问题发现看板与 AI 排查包编译器
 └── data/                          # 【通过 .gitignore 与外层隔离，仅存储在公司内网 Git 仓】
     ├── inbox/                     # 待确认草稿区（脚本扫描和 AI 拆解的初稿先放这里）
     ├── platforms.json             # 研发环境与各类日常平台的一站式直达入口配置
@@ -140,10 +140,10 @@ team-context/                      # 单个工作区：外层工具可带走，d
 - `data/`：当前团队的真实资产目录（仅存公司内网，严禁提交到公网仓库）
 
 日常动作：
-1. 扫库更新代码地图：`python3 scripts/scan_repo.py --repo <目标代码仓路径>`
-2. 编译可交互网页：`python3 scripts/build_portal.py --data data/ --out dist/`
-3. 同步 AI 写代码红线：`python3 scripts/sync_ai_rules.py --data data/ --target <业务代码仓>`
-4. 提交前安全与过期检查：`python3 scripts/check_safety.py --data data/`
+1. 扫库更新代码地图：`python3 context/scripts/scan_repo.py --repo <目标代码仓路径>`
+2. 编译可交互网页：`python3 context/scripts/build_portal.py --data data/ --out dist/`
+3. 同步 AI 写代码红线：`python3 context/scripts/sync_ai_rules.py --data data/ --target <业务代码仓>`
+4. 提交前安全与过期检查：`python3 context/scripts/check_safety.py --data data/`
 ```
 
 代码自动扫库不依赖复杂环境，依靠以下几条只读 Git 原生命令即可提取最核心的代码活力、隐性关联与故障高发区：
@@ -159,3 +159,7 @@ git log --since="180 days ago" --oneline --grep="revert\|hotfix\|fix:" -n 50
 # 3. 各核心目录下近 90 天高频提交人（生成不依赖过时架构图的找人映射）
 git shortlog -sn --since="90 days ago" -- src/ Sources/
 ```
+
+---
+
+> **仓库升级提示**：本方案源码已升级并入 [`team-kit`](../README.md) 的 `context/` 模块，同仓新增用于「发现业务与工程卡点并打包交接 AI 排查」的 `radar/` 模块，配套设计见 [Team Radar 设计方案](./team-radar.md)。

@@ -1,0 +1,99 @@
+{
+  "meta": {
+    "note": "Team Radar 负责前两步，团队选用的 AI IDE 与 Team Context 负责后两步。",
+    "subtitle": "进组前两周用于快速找重点，中后期转为按天或按周自动巡检，越用越准",
+    "title": "从发现问题到沉淀避坑的日常运转闭环"
+  },
+  "payload": {
+    "center": {
+      "label": "team-kit 闭环",
+      "sublabel": "Radar × AI × Context",
+      "tone": "blue"
+    },
+    "guardrail_title": "机制长期运转的两条前提（缺任意一条都会退化成没人看的一次性大盘）",
+    "guardrails": [
+      {
+        "detail": "前两周先用导表 JSON 跑通找重点和 AI 交接，看清真实痛点后再考虑写定时拉数脚本。",
+        "id": "g1",
+        "label": "前提一：先跑通小闭环，不硬造重型平台",
+        "tone": "amber"
+      },
+      {
+        "detail": "只有连续变化叠加崩溃、退回或明显下滑才进重点清单，防止天天狼来了导致全员关掉页面。",
+        "id": "g2",
+        "label": "前提二：问题卡住才预警，不报日常小抖动",
+        "tone": "amber"
+      }
+    ],
+    "layout": {
+      "width": 1320
+    },
+    "links": [
+      {
+        "from": "s1",
+        "label": "编译四视图雷达",
+        "to": "s2"
+      },
+      {
+        "from": "s2",
+        "label": "导出 3 步排查线索",
+        "to": "s3"
+      },
+      {
+        "from": "s3",
+        "label": "定位根因并上线修复",
+        "to": "s4"
+      },
+      {
+        "from": "s4",
+        "label": "验证消警并沉淀经验",
+        "to": "s1"
+      }
+    ],
+    "preset": "insight",
+    "stages": [
+      {
+        "id": "s1",
+        "items": [
+          "按天或按周汇总转化、崩溃、改动与返工记录",
+          "保持统一 snapshot.json 字段格式不乱"
+        ],
+        "label": "① 定期汇总快照",
+        "tag": "输入端",
+        "tone": "slate"
+      },
+      {
+        "id": "s2",
+        "items": [
+          "总览优先排 P0-P2 事项，减少大段文字猜重点",
+          "仿真手机定位到具体按钮、弹窗与可疑代码文件"
+        ],
+        "label": "② 四视图一眼揪出卡点",
+        "tag": "发现端",
+        "tone": "blue"
+      },
+      {
+        "id": "s3",
+        "items": [
+          "一键复制上下文包或命令行导出 3 步排查清单",
+          "如配 --context-dir 自动带出负责人与避坑背景"
+        ],
+        "label": "③ 打包交给 AI 查源码",
+        "tag": "交接端",
+        "tone": "slate"
+      },
+      {
+        "id": "s4",
+        "items": [
+          "次日看板回看退回率、手改率与崩溃是否回落",
+          "把确认后的踩坑经验补入 context/data/inbox/"
+        ],
+        "label": "④ 修复验证并补回 Context",
+        "tag": "闭环端",
+        "tone": "slate"
+      }
+    ]
+  },
+  "type": "flywheel",
+  "version": 1
+}
