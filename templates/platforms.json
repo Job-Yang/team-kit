@@ -1,0 +1,38 @@
+{
+  "team_name": "{{TEAM_NAME}}",
+  "updated": "{{TODAY}}",
+  "items": [
+    {
+      "category": "开发与编译",
+      "name": "主代码仓库",
+      "url": "https://git.internal.example.com/team/app",
+      "command": "git clone https://git.internal.example.com/team/app.git",
+      "desc": "日常拉取分支、提交 Merge Request 与代码评审入口",
+      "owner": "请填写代码仓管理员"
+    },
+    {
+      "category": "发布与配置",
+      "name": "CI/CD 构建与发布台",
+      "url": "https://ci.internal.example.com",
+      "command": "",
+      "desc": "查看打包进度、触发灰度发布与回滚操作",
+      "owner": "请填写发布接口人"
+    },
+    {
+      "category": "发布与配置",
+      "name": "远程配置与 AB 实验后台",
+      "url": "https://ab.internal.example.com",
+      "command": "",
+      "desc": "配置功能灰度开关、下发远程参数与查看实验分组",
+      "owner": "请填写实验负责同事"
+    },
+    {
+      "category": "监控与排障",
+      "name": "Crash 与性能监控平台（APM）",
+      "url": "https://apm.internal.example.com",
+      "command": "",
+      "desc": "查线上崩溃堆栈、启动耗时、掉帧率与接口错误率",
+      "owner": "请填写稳定性接口人"
+    }
+  ]
+}

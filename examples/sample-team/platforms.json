@@ -1,0 +1,70 @@
+{
+  "team_name": "星辰移动研发组（虚构演示样例）",
+  "updated": "2026-11-19",
+  "items": [
+    {
+      "category": "开发与编译",
+      "name": "主工程 Git 仓库（Monorepo）",
+      "url": "https://git.example.com/star-team/mobile-app",
+      "command": "git clone https://git.example.com/star-team/mobile-app.git",
+      "desc": "包含客户端 iOS/Android 与全栈 BFF 源码，合入需 2 位模块负责人评审",
+      "owner": "林深（工程基建）"
+    },
+    {
+      "category": "开发与编译",
+      "name": "本地一键安装与真机调试脚本",
+      "url": "https://git.example.com/star-team/mobile-app/blob/main/Makefile",
+      "command": "make bootstrap && make run-ios",
+      "desc": "自动拉取二进制预编译包与签名证书，首日配环境先跑这条命令",
+      "owner": "林深（工程基建）"
+    },
+    {
+      "category": "发布与配置",
+      "name": "CI/CD 构建与灰度发布台",
+      "url": "https://ci.example.com/star-team",
+      "command": "fastlane ios beta_release",
+      "desc": "每日 16:00 自动出测试包，支持 1% -> 10% -> 100% 灰度放量与一键回滚",
+      "owner": "陈默（发布值班）"
+    },
+    {
+      "category": "发布与配置",
+      "name": "远程配置与功能开关中心",
+      "url": "https://config.example.com/star-app",
+      "command": "",
+      "desc": "下发首页卡片降级开关、流式超时参数与版本强更白名单",
+      "owner": "顾言（全栈网关）"
+    },
+    {
+      "category": "发布与配置",
+      "name": "AB 实验平台",
+      "url": "https://ab.example.com/star-app",
+      "command": "",
+      "desc": "新建实验分组、查看核心指标显著性；新功能默认必须挂实验开关上线",
+      "owner": "苏夏（数据策略）"
+    },
+    {
+      "category": "监控与排障",
+      "name": "Crash 与流畅度 APM 后台",
+      "url": "https://apm.example.com/star-app",
+      "command": "",
+      "desc": "查崩溃堆栈符号化、启动耗时 P90、流式渲染掉帧与内存峰值",
+      "owner": "林深（客户端稳定性）"
+    },
+    {
+      "category": "监控与排障",
+      "name": "服务端日志与调用链检索",
+      "url": "https://trace.example.com/star-bff",
+      "command": "",
+      "desc": "通过客户端响应头里的 X-Trace-Id 一键反查 BFF 与下游大模型推理日志",
+      "owner": "顾言（全栈网关）"
+    },
+    {
+      "category": "协同与权限",
+      "name": "需求看板与权限自助申请",
+      "url": "https://project.example.com/star-team",
+      "command": "",
+      "desc": "领迭代任务、查当前冲刺进度；入职第 1 天先在权限台申请代码库与 APM 权限",
+      "owner": "周舟（技术项目经理）"
+    }
+  ]
+}

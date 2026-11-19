@@ -1,0 +1,111 @@
+{
+  "schema": "team-context-code-graph/v1",
+  "updated": "2026-11-19",
+  "repo_name": "star-mobile-monorepo",
+  "repo_web_url": "https://git.example.com/star-team/mobile-app",
+  "nodes": [
+    {
+      "id": "iOS/ChatUI",
+      "label": "iOS 对话主界面",
+      "group": "客户端页面",
+      "hot_changes": 42,
+      "owners": ["林深", "陆远"],
+      "summary": "承载 AI 流式会话、富文本卡片展示与底部输入栏，帧率要求严格。",
+      "url": "https://git.example.com/star-team/mobile-app/tree/main/iOS/ChatUI",
+      "local_path": "iOS/ChatUI"
+    },
+    {
+      "id": "iOS/StreamRenderer",
+      "label": "流式 Markdown 渲染器",
+      "group": "客户端基建",
+      "hot_changes": 31,
+      "owners": ["林深"],
+      "summary": "60ms 节流合并增量 Token 刷新，防止长对话高频重排引发掉帧。",
+      "url": "https://git.example.com/star-team/mobile-app/tree/main/iOS/StreamRenderer",
+      "local_path": "iOS/StreamRenderer"
+    },
+    {
+      "id": "iOS/MediaCapture",
+      "label": "拍图与端侧预处理",
+      "group": "客户端页面",
+      "hot_changes": 18,
+      "owners": ["陆远"],
+      "summary": "处理拍照裁剪、EXIF 隐私脱敏与端侧压缩后上传多模态解析。",
+      "url": "https://git.example.com/star-team/mobile-app/tree/main/iOS/MediaCapture",
+      "local_path": "iOS/MediaCapture"
+    },
+    {
+      "id": "Client/Bridge",
+      "label": "跨端 Bridge 容器",
+      "group": "客户端基建",
+      "hot_changes": 22,
+      "owners": ["陈默"],
+      "summary": "统一管理 H5/动态卡片与原生权限、蓝牙和系统能力调用。",
+      "url": "https://git.example.com/star-team/mobile-app/tree/main/Client/Bridge",
+      "local_path": "Client/Bridge"
+    },
+    {
+      "id": "Client/NetworkAuth",
+      "label": "统一网络与鉴权库",
+      "group": "客户端基建",
+      "hot_changes": 14,
+      "owners": ["林深", "顾言"],
+      "summary": "封装 SSE 长连接、自动重连、TraceID 注入与合规证书校验。",
+      "url": "https://git.example.com/star-team/mobile-app/tree/main/Client/NetworkAuth",
+      "local_path": "Client/NetworkAuth"
+    },
+    {
+      "id": "BFF/ChatRouter",
+      "label": "全栈对话 BFF 网关",
+      "group": "全栈服务",
+      "hot_changes": 37,
+      "owners": ["顾言"],
+      "summary": "负责会话上下文组装、SSE 卡片白名单校验与下游模型流式转发。",
+      "url": "https://git.example.com/star-team/mobile-app/tree/main/BFF/ChatRouter",
+      "local_path": "BFF/ChatRouter"
+    },
+    {
+      "id": "BFF/ComplianceFilter",
+      "label": "内容合规兜底拦截",
+      "group": "全栈服务",
+      "hot_changes": 19,
+      "owners": ["顾言", "苏夏"],
+      "summary": "高敏业务输出必须经双层安全拦截与免责声明拼接，禁止绕过。",
+      "url": "https://git.example.com/star-team/mobile-app/tree/main/BFF/ComplianceFilter",
+      "local_path": "BFF/ComplianceFilter"
+    },
+    {
+      "id": "Agent/Orchestrator",
+      "label": "多智能体编排服务",
+      "group": "AI 与算法",
+      "hot_changes": 28,
+      "owners": ["沈星"],
+      "summary": "意图路由、工具调用调度与结构化卡片 JSON 输出。",
+      "url": "https://git.example.com/star-team/mobile-app/tree/main/Agent/Orchestrator",
+      "local_path": "Agent/Orchestrator"
+    },
+    {
+      "id": "Data/EvalTracker",
+      "label": "埋点与评测回流",
+      "group": "数据与评测",
+      "hot_changes": 12,
+      "owners": ["苏夏"],
+      "summary": "上报端侧渲染首字耗时、中断率与人工纠偏样本归档。",
+      "url": "https://git.example.com/star-team/mobile-app/tree/main/Data/EvalTracker",
+      "local_path": "Data/EvalTracker"
+    }
+  ],
+  "edges": [
+    {"source": "iOS/ChatUI", "target": "iOS/StreamRenderer", "label": "增量渲染"},
+    {"source": "iOS/ChatUI", "target": "iOS/MediaCapture", "label": "调用拍图"},
+    {"source": "iOS/ChatUI", "target": "Client/Bridge", "label": "动态卡片交互"},
+    {"source": "iOS/ChatUI", "target": "Client/NetworkAuth", "label": "发起流式请求"},
+    {"source": "iOS/MediaCapture", "target": "Client/NetworkAuth", "label": "上传预处理图"},
+    {"source": "Client/Bridge", "target": "Data/EvalTracker", "label": "动作埋点"},
+    {"source": "Client/NetworkAuth", "target": "BFF/ChatRouter", "label": "HTTPS / SSE"},
+    {"source": "BFF/ChatRouter", "target": "BFF/ComplianceFilter", "label": "强制合规校验"},
+    {"source": "BFF/ChatRouter", "target": "Agent/Orchestrator", "label": "gRPC 编排"},
+    {"source": "Agent/Orchestrator", "target": "BFF/ComplianceFilter", "label": "结果审计"},
+    {"source": "BFF/ChatRouter", "target": "Data/EvalTracker", "label": "服务端指标落盘"}
+  ]
+}

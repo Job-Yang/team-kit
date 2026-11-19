@@ -1,0 +1,19 @@
+{
+  "schema": "team-context-code-graph/v1",
+  "updated": "{{TODAY}}",
+  "repo_name": "{{TEAM_NAME}}",
+  "repo_web_url": "",
+  "nodes": [
+    {
+      "id": "Client/AppEntry",
+      "label": "客户端入口模块",
+      "group": "客户端",
+      "hot_changes": 10,
+      "owners": ["待认领"],
+      "summary": "请运行 scan_repo.py 自动生成草稿并补全模块说明",
+      "url": "",
+      "local_path": ""
+    }
+  ],
+  "edges": []
+}
